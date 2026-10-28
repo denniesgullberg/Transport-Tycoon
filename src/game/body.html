@@ -1,0 +1,16 @@
+<div id="app">
+  <div id="topbar"><span id="sdate">—</span><span id="scompany">—</span><span id="smoney">£0</span></div>
+  <div id="stage"><canvas id="map"></canvas>
+    <div id="wins"></div>
+    <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+    <div id="hint"></div><div id="toast"></div>
+    <div id="gameover" hidden><div><h2>Bankrupt</h2><p>Your company ran out of money.</p><button class="gb big" id="go-new">New game</button></div></div>
+  </div>
+  <div id="ticker" class="info" role="button"></div>
+  <div id="tools"></div>
+  <div id="bar">
+    <button id="bmenu" class="gb">Menu</button><button id="bshop" class="gb">Buy</button><button id="bfleet" class="gb">Fleet</button><button id="bfin" class="gb">Money</button><button id="bgraph" class="gb">Graphs</button><button id="bco" class="gb">Company</button><button id="bnews" class="gb">News</button>
+    <span class="grow"></span><button id="bpause" class="gb sq">⏸</button><button class="gb sq spd on" data-s="1">1×</button><button class="gb sq spd" data-s="2">2×</button><button class="gb sq spd" data-s="4">4×</button>
+  </div>
+  <div id="menu" hidden></div>
+</div>

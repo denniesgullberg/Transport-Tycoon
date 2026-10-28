@@ -1,0 +1,208 @@
+// -------------------------------------------------------------- menus & loop
+const SLOT = "tt-save-1", AUTO = "tt-auto";
+function saveNow(slot) {
+  syncPersist();
+  try { const r = SV.saveGame(slot, S, S.name + " " + S.date.year); if (!r.ok) toast(r.error || "Could not save.", true); else toast("Game saved."); } catch (e) { toast("Saving is blocked in this browser.", true); }
+}
+function loadSlot(slot) {
+  let st = null;
+  try { st = SV.loadGame(slot); } catch (e) { st = null; }
+  if (!st) { toast("No saved game found.", true); return false; }
+  S = st; initRuntime(); ui.paused = false; closeAllWins(); hideMenu(); afterStart(); toast("Game loaded."); return true;
+}
+function hasSave(slot) { try { return !!SV.listSaves().find(s => s.slot === slot); } catch (e) { return false; } }
+
+function afterStart() {
+  buildToolbar(); setTool("inspect"); resize();
+  const t = S.map.towns[0]; if (t) { view.z = 1.1; centerOn(t.x, t.y); }
+  $("#gameover").hidden = true;
+}
+function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
+
+const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "" };
+function showMenu(first) {
+  ui.menuOpen = true;
+  const m = $("#menu"); m.hidden = false;
+  const anySave = hasSave(AUTO) || hasSave(SLOT);
+  if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
+  const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
+  m.innerHTML = "<div class='mbox'><h1>Transport &amp; Co.</h1><p class='sub'>A road transport company in the style of the old classics</p>" +
+    "<div class='mcols'>" +
+    (anySave ? "<button class='gb wide big' data-act='continue'>Continue game</button>" : "") +
+    "<h3>New game</h3>" +
+    "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
+    "<label>Difficulty</label><div class='chips'>" + opt("difficulty", "easy", "Easy") + opt("difficulty", "medium", "Medium") + opt("difficulty", "hard", "Hard") + "</div>" +
+    "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + "</div>" +
+    "<label>Towns</label><div class='chips'>" + opt("towns", 10, "Few") + opt("towns", 18, "Normal") + opt("towns", 26, "Many") + "</div>" +
+    "<label>Rival companies</label><div class='chips'>" + [0, 1, 2, 3].map(n => opt("rivals", n, n)).join("") + "</div>" +
+    "<label>Start year</label><div class='chips'>" + [1950, 1970, 1990].map(n => opt("year", n, n)).join("") + "</div>" +
+    "<label>Map seed</label><div class='row'><input id='seed' value='" + menuState.seed + "'><button class='gb sm' data-act='dice'>Random</button></div>" +
+    "<button class='gb wide big go' data-act='start'>Start game</button>" +
+    "<button class='gb wide' data-act='tests'>Open test panel</button>" +
+    "</div></div>";
+  m.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.g) { menuState[b.dataset.g] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; menuState.seed = $("#seed").value; showMenu(); return; }
+    const a = b.dataset.act;
+    if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
+    if (a === "start") {
+      menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
+      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed });
+    }
+    if (a === "continue") { if (!(hasSave(AUTO) && loadSlot(AUTO))) loadSlot(SLOT); }
+    if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
+  };
+}
+function hideMenu() { ui.menuOpen = false; $("#menu").hidden = true; }
+
+function menuWin() {
+  openWin("menu", "Game menu", body => {
+    body.innerHTML = "<div class='col'></div>";
+    const c = body.firstChild;
+    c.appendChild(btn("Save game", () => saveNow(SLOT)));
+    c.appendChild(btn("Load saved game", () => loadSlot(SLOT)));
+    c.appendChild(btn(sound.muted ? "Sound: off" : "Sound: on", function () { sound.setMuted(!sound.muted); this.textContent = sound.muted ? "Sound: off" : "Sound: on"; }));
+    c.appendChild(btn("Export save to file", () => { try { syncPersist(); SV.exportToFile(S, "transport-co-save.json", S.name); } catch (e) { toast("Export is blocked here.", true); } }));
+    c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
+    c.appendChild(btn("Main menu", () => { closeAllWins(); showMenu(); }));
+  });
+}
+
+// -------------------------------------------------------------- bottom bar
+function wireBars() {
+  $("#bpause").onclick = () => { ui.paused = !ui.paused; sound.play("click"); };
+  document.querySelectorAll(".spd").forEach(b => b.onclick = () => { ui.speed = +b.dataset.s; ui.paused = false; });
+  $("#bmenu").onclick = menuWin;
+  $("#bshop").onclick = openShop;
+  $("#bfleet").onclick = fleetWin;
+  $("#bfin").onclick = financeWin;
+  $("#bgraph").onclick = graphsWin;
+  $("#bco").onclick = companyWin;
+  $("#bnews").onclick = newsWin;
+  $("#ticker").onclick = () => { if (ui.jump) centerOn(ui.jump.x, ui.jump.y); else newsWin(); };
+  $("#zin").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
+  $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
+  $("#go-new").onclick = () => { closeAllWins(); showMenu(); };
+  window.addEventListener("resize", resize);
+  window.addEventListener("keydown", e => {
+    if (!S || ui.menuOpen || e.target.tagName === "INPUT") return;
+    if (e.key === " ") { ui.paused = !ui.paused; e.preventDefault(); }
+    const pan = 40; if (e.key === "ArrowLeft") view.x += pan; if (e.key === "ArrowRight") view.x -= pan; if (e.key === "ArrowUp") view.y += pan; if (e.key === "ArrowDown") view.y -= pan;
+  });
+  sound.attachUnlock && sound.attachUnlock(document.body);
+}
+
+let lastT = performance.now(), dayAcc = 0, autoT = 0, uiT = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  if (S) {
+    if (!ui.paused && !S.gameOver && !ui.menuOpen) {
+      const dd = dt * ui.speed / DAY_SECONDS;
+      moveVehicles(dd); dayAcc += dd;
+      let g = 8; while (dayAcc >= 1 && g-- > 0) { dayAcc -= 1; dailyTick(); }
+      if (dayAcc > 4) dayAcc = 0;
+      autoT += dt; if (autoT > 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
+    }
+    draw();
+    uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); if (S.gameOver) $("#gameover").hidden = false; }
+  }
+  requestAnimationFrame(frame);
+}
+
+// -------------------------------------------------------------- test helpers
+// Build a ready-made route: a depot, a bus stop in the two closest towns, and a road between them.
+function buildDemoRoute() {
+  const ts = S.map.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8);
+  let best = null;
+  for (const a of ts) for (const b of ts) { if (a === b) continue; const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y); if (d >= 8 && d <= 40 && R.roads.connected(a, b) !== undefined) { if (!best || d < best.d) best = { a, b, d }; } }
+  if (!best) return { ok: false, msg: "No suitable pair of towns on this map." };
+  const { a, b } = best;
+  S.company.cash += 60000;
+  const ra = R.roads.nearestRoad(a.x, a.y, 6), rb = R.roads.nearestRoad(b.x, b.y, 6);
+  if (!ra || !rb) return { ok: false, msg: "Towns have no roads near their centres." };
+  if (!R.roads.connected(ra, rb)) {
+    // lay an L-shaped road, retrying the other corner if blocked
+    const tryL = (cornerFirstX) => {
+      const pts = []; let x = ra.x, y = ra.y;
+      if (cornerFirstX) { while (x !== rb.x) { x += Math.sign(rb.x - x); pts.push({ x, y }); } while (y !== rb.y) { y += Math.sign(rb.y - y); pts.push({ x, y }); } }
+      else { while (y !== rb.y) { y += Math.sign(rb.y - y); pts.push({ x, y }); } while (x !== rb.x) { x += Math.sign(rb.x - x); pts.push({ x, y }); } }
+      return pts;
+    };
+    for (const first of [true, false]) { for (const p of tryL(first)) buildRoadTile(p.x, p.y); if (R.roads.connected(ra, rb)) break; }
+    if (!R.roads.connected(ra, rb)) return { ok: false, msg: "Could not join the towns by road (water or hills in the way). Try Bridge/Raise tools or another seed." };
+  }
+  let dp = null;
+  for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[2,0],[-2,0],[0,2],[0,-2]]) { const x = ra.x + dx, y = ra.y + dy; if (R.roads.hasRoad(x, y) && !R.stationAt.has(key(x, y)) && !R.depotAt.has(key(x, y))) { dp = { x, y }; break; } }
+  const d1 = dp ? placeDepot(dp.x, dp.y) : placeDepot(ra.x, ra.y);
+  const s1 = placeStation(ra.x, ra.y, "busStop", "player");
+  const s2 = placeStation(rb.x, rb.y, "busStop", "player");
+  return { ok: true, depot: d1.ok ? d1.depot : S.depots[0], s1: s1.ok ? s1.station : R.stationAt.get(key(ra.x, ra.y)), s2: s2.ok ? s2.station : R.stationAt.get(key(rb.x, rb.y)), a, b };
+}
+// Lay a road or track between two good spots and add a depot and two stops.
+// cargo: passengers | coal | wood | grain | goods | steel.  mode: road | rail.
+function spotNear(x, y, r, tx, ty) {
+  const m = S.map; let best = null, bd = 1e9;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    const px = x + dx, py = y + dy; if (!inB(px, py)) continue; const i = key(px, py);
+    if (m.water[i] || m.occupied[i] || R.roads.hasRoad(px, py) || R.rail.hasRoad(px, py)) continue;
+    const d = Math.abs(px - tx) + Math.abs(py - ty); if (d < bd) { bd = d; best = { x: px, y: py }; }
+  }
+  return best;
+}
+function findEnds(cargo) {
+  const m = S.map; let pairs = [];
+  if (cargo === "passengers" || cargo === "mail") { const ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 10); for (const a of ts) for (const b of ts) if (a !== b) pairs.push([a, b, 4, 4]); }
+  else {
+    const from = m.industries.filter(i => CARGO_FROM_IND[i.kind] === cargo), to = m.industries.filter(i => (CARGO_TO_IND[cargo] || []).includes(i.kind));
+    for (const a of from) for (const b of to) pairs.push([a, b, 2, 2]);
+    if (cargo === "goods") { pairs = []; const ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8); for (const a of from) for (const b of ts) pairs.push([a, b, 2, 4]); }
+  }
+  pairs = pairs.filter(([a, b]) => { const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y); return d >= 10 && d <= 48; }).sort((p, q) => (Math.abs(p[0].x - p[1].x) + Math.abs(p[0].y - p[1].y)) - (Math.abs(q[0].x - q[1].x) + Math.abs(q[0].y - q[1].y)));
+  for (const [a, b, ra, rb] of pairs) { const sa = spotNear(a.x, a.y, ra, b.x, b.y), sb = spotNear(b.x, b.y, rb, a.x, a.y); if (sa && sb && Math.abs(sa.x - sb.x) + Math.abs(sa.y - sb.y) >= 8) return { a: sa, b: sb, from: a, to: b }; }
+  return null;
+}
+function buildDemoLine(mode, cargo) {
+  const ends = findEnds(cargo); if (!ends) return { ok: false, msg: "No suitable " + cargo + " pair on this map." };
+  const net = netFor(mode === "rail" ? "rail" : "road"), other = mode === "rail" ? R.roads : R.rail, m = S.map;
+  const api = { width: m.w, height: m.h, tileCost(x, y) { const i = key(x, y); if (m.water[i] || other.hasRoad(x, y)) return null; if (net.hasRoad(x, y)) return 1; if (m.occupied[i]) return null; return 4 + (m.forest[i] ? 2 : 0); } };
+  const path = AI.findPath(api, ends.a, ends.b); if (!path || path.length < 5) return { ok: false, msg: "No buildable route between the two spots." };
+  S.company.cash += 120000;
+  for (const q of path) { const r = mode === "rail" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y); if (!r.ok) return { ok: false, msg: r.reason }; }
+  const dk = mode === "rail" ? "rail" : "road";
+  const sk = mode === "rail" ? "trainStation" : (cargo === "passengers" ? "busStop" : "truckStop");
+  const dp = placeDepot(path[1].x, path[1].y, dk);
+  const s1 = placeStation(path[0].x, path[0].y, sk, "player"), s2 = placeStation(path[path.length - 1].x, path[path.length - 1].y, sk, "player");
+  if (!dp.ok || !s1.ok || !s2.ok) return { ok: false, msg: (dp.reason || s1.reason || s2.reason) };
+  return { ok: true, depot: dp.depot, s1: s1.station, s2: s2.station, ends, mode, cargo, len: path.length };
+}
+function demoBuy(line, count) {
+  const y = S.date.year; let id;
+  if (line.mode === "rail") {
+    const loco = V.availableModels(y, "locomotive").sort((a, b) => a.price - b.price)[0];
+    const wag = V.availableModels(y, "wagon").filter(w => w.cargo === line.cargo)[0] || V.availableModels(y, "wagon")[0];
+    const tm = V.buildTrainModel(loco.id, wag.id, 5); if (!tm) return { ok: false, msg: "No train model." }; id = tm.id;
+  } else {
+    const list = V.availableModels(y, line.cargo === "passengers" ? "bus" : "truck"); const m = list.filter(x => x.cargo === line.cargo).sort((a, b) => a.price - b.price)[0];
+    if (!m) return { ok: false, msg: "No vehicle for " + line.cargo }; id = m.id;
+  }
+  let last = null; for (let i = 0; i < (count || 1); i++) { last = buyVehicle(id, line.depot); if (!last.ok) return last; if (!last.vh.orders.orders.length) { addStopTo(last.vh, line.s1.id); addStopTo(last.vh, line.s2.id); } }
+  return last;
+}
+function demoLine(mode, cargo, count) {
+  const l = buildDemoLine(mode, cargo); if (!l.ok) return l;
+  const b = demoBuy(l, count); if (!b.ok) return { ok: false, msg: b.msg };
+  centerOn(l.s1.x, l.s1.y); return { ok: true, line: l, vh: b.vh };
+}
+function simulateDays(n) {
+  const before = { cash: S.company.cash, pax: S.metrics.passengers, cargo: S.metrics.cargo };
+  for (let i = 0; i < n; i++) { moveVehicles(1); dailyTick(); }
+  return { days: n, cash: Math.round(S.company.cash - before.cash), pax: S.metrics.passengers - before.pax, cargo: S.metrics.cargo - before.cargo, date: S.date };
+}
+
+// -------------------------------------------------------------- boot
+function boot() {
+  wireBars(); resize();
+  if (S == null) { newGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 18, rivals: 0, startYear: 1950, seed: "7" }); buildToolbar(); resize(); centerOn(S.map.towns[0].x, S.map.towns[0].y); }
+  showMenu(true);
+  requestAnimationFrame(frame);
+}

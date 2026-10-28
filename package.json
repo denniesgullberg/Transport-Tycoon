@@ -1,0 +1,17 @@
+{
+  "name": "transport-tycoon",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Transport & Co. - a Transport Tycoon Deluxe style browser game in one HTML file",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node scripts/test.mjs",
+    "typecheck": "tsc --noEmit --strict --target es2020 --moduleResolution node src/engine/*.ts"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright": "1.63.0",
+    "typescript": "^5.4.5"
+  }
+}

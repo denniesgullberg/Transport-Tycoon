@@ -1,0 +1,13 @@
+import * as core from "./tycoon-core";
+import * as vehicles from "./vehicles";
+import * as mapgen from "./mapgen";
+import * as terrain from "./terrain";
+import * as signals from "./signals";
+import * as roadnet from "./roadnet";
+import * as stations from "./stations";
+import * as orders from "./orders";
+import * as events from "./events";
+import * as save from "./savegame";
+import * as ai from "./ai-competitor";
+import * as sound from "./sound";
+(window as any).TT = { core, vehicles, mapgen, terrain, signals, roadnet, stations, orders, events, save, ai, sound: sound.sound };
