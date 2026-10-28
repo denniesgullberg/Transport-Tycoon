@@ -8,7 +8,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const game = (f) => readFileSync(join(root, "src/game", f), "utf8");
 
 // Order matters: later parts use functions from earlier ones.
-const PARTS = ["a-state.js", "a2-rail.js", "a3-content.js", "b-render.js", "c-ui.js", "c2-fleet.js", "c3-tools.js", "c4-vehicles.js", "c5-world.js", "d-main.js", "e-tests.js"];
+const PARTS = ["a-state.js", "a2-rail.js", "a3-content.js", "b-render.js", "c-ui.js", "c2-fleet.js", "c3-tools.js", "c4-vehicles.js", "c5-world.js", "c6-polish.js", "d-main.js", "e-tests.js"];
 
 const res = await build({ entryPoints: [join(root, "src/engine/entry.ts")], bundle: true, format: "iife", write: false, logLevel: "warning" });
 const engine = res.outputFiles[0].text;

@@ -481,7 +481,7 @@ function buildRoadTile(x, y, ownerPays = true) {
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
   let c = cost(ROAD_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.rail.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
-  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); }
+  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); S.stats = S.stats || { roads: 0 }; S.stats.roads++; }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
 }

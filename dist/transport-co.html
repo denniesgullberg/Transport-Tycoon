@@ -66,20 +66,39 @@ input[type=range]{accent-color:var(--olive2)}
 .endbox{background:var(--panel);color:var(--ink);border:3px solid #3b3a1a;border-radius:4px;padding:14px;max-width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;text-align:left}.endbox h2{margin:0 0 6px;color:var(--olive)}
 .legend{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0;font-size:12px}.legend i{display:inline-block;width:10px;height:10px;margin-right:4px;border-radius:2px;vertical-align:middle}
 .sh{margin:4px 0;border-bottom:1px dotted var(--line)}
+#minimap{position:absolute;right:6px;top:6px;border:2px solid #14170a;border-radius:3px;background:#16210f;z-index:4;touch-action:none;cursor:crosshair}#minimap[hidden]{display:none}
+#zoom button#bmm{font-size:15px}
+#tut{position:absolute;left:6px;top:6px;right:6px;z-index:4;background:var(--panel);border:2px solid #3b3a1a;border-left:6px solid var(--gold);border-radius:3px;padding:6px 8px;font-size:13px;box-shadow:0 4px 12px var(--shadow)}#tut[hidden]{display:none}
+.tut-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:2px}.tut-h button{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--panel2);border-radius:2px;padding:3px 8px;cursor:pointer;color:var(--ink);min-height:28px}
+@media (min-width:900px){
+  #app{display:grid;grid-template-columns:150px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto;gap:4px}
+  #topbar{grid-column:1/-1}
+  #tools{grid-column:1;grid-row:2/4;flex-direction:column;overflow-y:auto;overflow-x:hidden;padding:0}
+  #tools .tool{text-align:left;min-height:32px;padding:5px 9px}
+  #stage{grid-column:2;grid-row:2}
+  #ticker{grid-column:2;grid-row:3}
+  #bar{grid-column:1/-1;grid-row:4}
+  .win{width:min(420px,calc(100% - 16px))}.win.wide{width:min(560px,calc(100% - 16px))}
+  #minimap{width:150px;height:150px}
+  #tut{right:170px;max-width:520px}
+}
+body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;right:6px}}
 </style>
 <div id="app">
   <div id="topbar"><span id="sdate">—</span><span id="scompany">—</span><span id="smoney">£0</span></div>
   <div id="stage"><canvas id="map"></canvas>
     <div id="wins"></div>
-    <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+    <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="bmm" aria-label="Show or hide the minimap">▦</button></div>
+    <canvas id="minimap" aria-label="Minimap. Tap to move the view."></canvas>
+    <div id="tut" hidden></div>
     <div id="hint"></div><div id="toast"></div>
     <div id="gameover" hidden><div><h2>Bankrupt</h2><p>Your company ran out of money.</p><button class="gb big" id="go-new">New game</button></div></div>
   </div>
   <div id="ticker" class="info" role="button"></div>
   <div id="tools"></div>
   <div id="bar">
-    <button id="bmenu" class="gb">Menu</button><button id="bshop" class="gb">Buy</button><button id="bfleet" class="gb">Fleet</button><button id="bfin" class="gb">Money</button><button id="bgraph" class="gb">Graphs</button><button id="bco" class="gb">Company</button><button id="bnews" class="gb">News</button>
-    <span class="grow"></span><button id="bpause" class="gb sq">⏸</button><button class="gb sq spd on" data-s="1">1×</button><button class="gb sq spd" data-s="2">2×</button><button class="gb sq spd" data-s="4">4×</button>
+    <button id="bmenu" class="gb">Menu</button><button id="bshop" class="gb">Buy</button><button id="bfleet" class="gb">Fleet</button><button id="bfin" class="gb">Money</button><button id="bgraph" class="gb">Graphs</button><button id="bco" class="gb">Company</button><button id="bnews" class="gb">News</button><button id="bhelp" class="gb sq" aria-label="Keys and help">?</button>
+    <span class="grow"></span><button id="bpause" class="gb sq">❚❚</button><button class="gb sq spd on" data-s="1">1×</button><button class="gb sq spd" data-s="2">2×</button><button class="gb sq spd" data-s="4">4×</button>
   </div>
   <div id="menu" hidden></div>
 </div>
@@ -3724,7 +3743,7 @@ function buildRoadTile(x, y, ownerPays = true) {
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
   let c = cost(ROAD_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.rail.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
-  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); }
+  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); S.stats = S.stats || { roads: 0 }; S.stats.roads++; }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
 }
@@ -4696,7 +4715,7 @@ function updateStatus() {
   $("#sdate").textContent = d.day + " " + EV.MONTH_NAMES[d.month] + " " + d.year;
   $("#scompany").textContent = "— " + S.name + " —";
   const mEl = $("#smoney"); mEl.textContent = money(S.company.cash); mEl.classList.toggle("neg", S.company.cash < 0);
-  $("#bpause").textContent = ui.paused ? "▶" : "⏸";
+  $("#bpause").textContent = ui.paused ? "▶" : "❚❚";
   document.querySelectorAll(".spd").forEach(b => b.classList.toggle("on", !ui.paused && +b.dataset.s === ui.speed));
   const n = EV.latestNews(S.news, 1)[0];
   $("#ticker").textContent = n ? n.text : "";
@@ -4724,7 +4743,7 @@ cv.addEventListener("pointermove", e => {
   if (!tap) return;
   if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
   if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
-  if (tap.moved) { view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
+  if (tap.moved) { ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
 });
 function endPtr(e) {
   const p = pos(e); ptrs.delete(e.pointerId);
@@ -4829,6 +4848,7 @@ function vehicleWin(vh) {
       acts.appendChild(ss);
       acts.appendChild(btn("Service", () => { const r = sendToDepot(vh, false); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + "."); }));
       acts.appendChild(btn("Stop in depot", () => { const r = sendToDepot(vh, true); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + " to stop there."); }));
+      acts.appendChild(btn("Follow", () => { followVehicle(vh); }));
       acts.appendChild(btn("Clone", () => { const r = cloneVehicle(vh); if (!r.ok) return toast(r.msg, true); toast("Cloned with the same orders."); vehicleWin(r.vh); }));
       const ro = refitOptions(vh);
       if (ro.length) {
@@ -5762,6 +5782,131 @@ function cargoRatesSvg() {
   return "<svg viewBox='0 0 " + W + " " + H + "' class='gr'>" + g + "</svg><div class='legend'>" + cs.map(c => "<span><i style='background:" + rateCol(c) + "'></i>" + (CARGO_NAME[c] || c) + "</span>").join("") + "</div><p class='dim small'>Payment for 10 units carried 20 tiles, by days in transit. Trains earn " + TRAIN_BONUS + " times this.</p>";
 }
 
+// ------------------------------------------------------------------ tutorial
+// Short guided steps for a first game. Each step moves on by itself once it is done.
+const TUTORIAL = [
+  { title: "Lay a road", text: "Pick Road and drag along the ground in a town to add a few tiles of road.", done: () => (S.stats && S.stats.roads >= 3) },
+  { title: "Two bus stops", text: "Pick Bus stop and tap two road tiles at least 6 tiles apart, each near houses.", done: () => { const b = S.stations.filter(s => s.owner === "player" && s.kind === "busStop"); return b.some(a => b.some(c => Math.abs(a.x - c.x) + Math.abs(a.y - c.y) >= 6)); } },
+  { title: "A depot", text: "Pick Depot and tap a road tile connected to your stops. Vehicles are built there.", done: () => S.depots.some(d => d.owner === "player" && d.kind === "road") },
+  { title: "Buy a bus", text: "Tap Buy, choose a bus and tap Build vehicle.", done: () => playerVehicles().some(v => modelOf(v).type === "bus") },
+  { title: "Check the orders", text: "Tap Fleet, then your bus. It needs both stops in its orders. Add them if they are missing.", done: () => playerVehicles().some(v => modelOf(v).type === "bus" && v.orders.orders.filter(o => o.kind === "stop").length >= 2) },
+  { title: "First passengers", text: "Tap 2× to speed up and wait for the first delivery. Watch for the +£ above the stop.", done: () => S.metrics.passengers > 0 },
+  { title: "You are up and running", text: "Next, tap an industry to see what it makes and which trucks carry it. Good luck!", done: () => false, last: true },
+];
+function tutorialStart() { S.tutorial = { step: 0 }; prefs.tutorialDone = false; savePrefs(); renderTutorial(); }
+function tutorialStop() { if (S) S.tutorial = null; prefs.tutorialDone = true; savePrefs(); renderTutorial(); }
+function tutorialTick() {
+  if (!S || !S.tutorial) return;
+  const st = TUTORIAL[S.tutorial.step]; if (!st) return tutorialStop();
+  if (!st.last && st.done()) { S.tutorial.step++; sound.play("cash"); renderTutorial(); }
+}
+function renderTutorial() {
+  const box = $("#tut"); if (!box) return;
+  const t = S && S.tutorial, st = t && TUTORIAL[t.step];
+  if (!st) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = "<div class='tut-h'><b>" + (t.step + 1) + " of " + TUTORIAL.length + ": " + st.title + "</b><button data-t='skip' aria-label='Close the tutorial'>" + (st.last ? "Done" : "Skip") + "</button></div><div>" + st.text + "</div>";
+  box.onclick = e => { if (e.target.dataset.t === "skip") tutorialStop(); };
+}
+
+// ------------------------------------------------------------------ minimap
+// A small overview of the whole map. Tap or drag on it to move the view there.
+const MM = { canvas: null, img: null, at: 0, size: 112, show: true };
+function minimapColour(x, y) {
+  const m = S.map, i = y * m.w + x, k = key(x, y);
+  if (R.stationAt.has(k)) { const s = R.stationAt.get(k); return s.owner === "player" ? "#1e5aa8" : s.owner === "public" ? "#777" : "#c0392b"; }
+  if (R.rail.hasRoad(x, y)) return "#6b4a2b";
+  if (R.roads.hasRoad(x, y)) return "#55585e";
+  if (R.bld.has(k)) return "#c0392b";
+  if (m.water[i]) return "#4f9fd6";
+  if (m.forest[i]) return "#2f6b2f";
+  const pal = palette(); return pal.top[m.height[i]] || "#78a853";
+}
+function renderMinimapImage() {
+  const m = S.map, c = document.createElement("canvas"); c.width = m.w; c.height = m.h;
+  const g = c.getContext("2d"), data = g.createImageData(m.w, m.h);
+  const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const cache = {};
+  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
+    const col = minimapColour(x, y), rgb = cache[col] || (cache[col] = /^#[0-9a-f]{6}$/i.test(col) ? hex(col) : [120, 168, 83]), o = (y * m.w + x) * 4;
+    data.data[o] = rgb[0]; data.data[o + 1] = rgb[1]; data.data[o + 2] = rgb[2]; data.data[o + 3] = 255;
+  }
+  for (const ind of m.industries) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = ind.x + dx, y = ind.y + dy; if (!inB(x, y)) continue; const o = (y * m.w + x) * 4; data.data[o] = 230; data.data[o + 1] = 170; data.data[o + 2] = 40; }
+  g.putImageData(data, 0, 0); MM.img = c;
+}
+function drawMinimap(now) {
+  const cvm = MM.canvas; if (!cvm || !S || !MM.show) return;
+  MM.size = window.innerWidth >= 900 ? 150 : 112;
+  if (!MM.img || now - MM.at > 2000) { renderMinimapImage(); MM.at = now; }
+  const g = cvm.getContext("2d"), n = MM.size, d = Math.min(2, window.devicePixelRatio || 1);
+  if (cvm.width !== n * d) { cvm.width = n * d; cvm.height = n * d; cvm.style.width = n + "px"; cvm.style.height = n + "px"; }
+  g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, n, n);
+  // draw the map turned 45 degrees so it matches the isometric view
+  g.save(); g.translate(n / 2, n / 2); g.scale(1, 0.5); g.rotate(Math.PI / 4);
+  const s = n / Math.SQRT2 / S.map.w * 1.0;
+  g.imageSmoothingEnabled = false; g.drawImage(MM.img, -S.map.w * s / 2, -S.map.h * s / 2, S.map.w * s, S.map.h * s);
+  g.restore();
+  // the part of the map on screen
+  const corners = [[0, 0], [cssW, 0], [cssW, cssH], [0, cssH]].map(([sx, sy]) => { const wx = (sx - view.x) / view.z, wy = (sy - view.y) / view.z; return mmPoint((wx / (TW / 2) + wy / (TH / 2)) / 2, (wy / (TH / 2) - wx / (TW / 2)) / 2); });
+  g.strokeStyle = "#fff"; g.lineWidth = 1.2; g.beginPath(); corners.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath(); g.stroke();
+  for (const v of playerVehicles()) { const p = mmPoint(v.tile.x, v.tile.y); g.fillStyle = "#ffe26b"; g.fillRect(p.x - 1, p.y - 1, 2, 2); }
+}
+function mmPoint(tx, ty) { const n = MM.size, s = n / Math.SQRT2 / S.map.w, u = (tx - S.map.w / 2) * s, v = (ty - S.map.h / 2) * s; return { x: n / 2 + (u - v) * Math.SQRT1_2, y: n / 2 + (u + v) * Math.SQRT1_2 * 0.5 }; }
+function mmToTile(px, py) { const n = MM.size, s = n / Math.SQRT2 / S.map.w, a = (px - n / 2) / Math.SQRT1_2, b = (py - n / 2) / (Math.SQRT1_2 * 0.5); return { x: (a + b) / 2 / s + S.map.w / 2, y: (b - a) / 2 / s + S.map.h / 2 }; }
+function setupMinimap() {
+  MM.canvas = $("#minimap"); if (!MM.canvas) return;
+  let down = false;
+  const go = (e) => { const r = MM.canvas.getBoundingClientRect(), t = mmToTile(e.clientX - r.left, e.clientY - r.top); ui.follow = null; centerOn(clamp(Math.round(t.x), 0, S.map.w - 1), clamp(Math.round(t.y), 0, S.map.h - 1)); };
+  MM.canvas.addEventListener("pointerdown", e => { down = true; MM.canvas.setPointerCapture(e.pointerId); go(e); e.stopPropagation(); });
+  MM.canvas.addEventListener("pointermove", e => { if (down) go(e); });
+  MM.canvas.addEventListener("pointerup", () => { down = false; });
+  const set = (on) => { MM.show = on; MM.canvas.hidden = !on; document.body.classList.toggle("mm-on", on); };
+  set(window.innerWidth >= 600);   // phones start with the minimap folded away
+  $("#bmm").onclick = () => set(!MM.show);
+}
+
+// --------------------------------------------------------------- follow vehicle
+function followVehicle(vh) { ui.follow = vh ? vh.id : null; if (vh) toast("Following #" + vh.id.slice(1) + ". Drag the map to stop."); }
+function followTick() {
+  if (!ui.follow || !S) return;
+  const v = S.vehicles.find(x => x.id === ui.follow); if (!v) { ui.follow = null; return; }
+  const u = isTrain(v) ? trainUnits(v)[0] : vehiclePos(v); if (!u) return;
+  const tx = cssW / 2 - u.x * view.z, ty = cssH / 2 - u.y * view.z;
+  view.x += (tx - view.x) * 0.2; view.y += (ty - view.y) * 0.2;
+}
+
+// ------------------------------------------------------------ keyboard and help
+const KEYS = [
+  ["Space", "Pause or play"], ["1 2 3", "Speed 1×, 2×, 4×"], ["Esc", "Close the top window, or back to Inspect"], ["+ −", "Zoom"], ["Arrows", "Move the map"],
+  ["I", "Inspect"], ["R", "Road"], ["T", "Track"], ["S", "Signal"], ["B", "Bus stop"], ["K", "Truck stop"], ["N", "Train station"], ["D", "Depot"], ["P", "Train depot"],
+  ["L", "Raise land"], ["O", "Lower land"], ["X", "Bulldoze"], ["Ctrl+Z", "Undo"], ["V", "Buy vehicles"], ["F", "Fleet"], ["M", "Money"], ["G", "Graphs"], ["C", "Company"], ["?", "This list"],
+];
+const KEY_TOOLS = { i: "inspect", r: "road", t: "track", s: "signal", b: "busStop", k: "truckStop", n: "trainStation", d: "depot", p: "railDepot", l: "raise", o: "lower", x: "bulldoze" };
+function helpWin() {
+  openWin("help", "Keys and help", body => {
+    body.innerHTML = "<p class='dim'>On a phone: drag to move the map, pinch to zoom, tap to use the tool. Right-click on a computer goes back to Inspect.</p><table class='tb'>" + KEYS.map(([k, d]) => "<tr><td><b>" + k + "</b></td><td>" + d + "</td></tr>").join("") + "</table>";
+    body.appendChild(btn("Start the tutorial", () => { closeWin("help"); tutorialStart(); }));
+  });
+}
+function onKey(e) {
+  if (!S || ui.menuOpen || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  const k = e.key;
+  if (k === "Escape") { const ids = Object.keys(openWins); if (ids.length) { let top = ids[0]; for (const id of ids) if (+openWins[id].w.style.zIndex > +openWins[top].w.style.zIndex) top = id; closeWin(top); } else setTool("inspect"); return; }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { e.preventDefault(); const r = undoLast(); toast(r.ok ? "Undone. Refunded " + money(r.cost) + "." : r.reason, !r.ok); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (k === "1" || k === "2" || k === "3") { ui.speed = ({ 1: 1, 2: 2, 3: 4 })[k]; ui.paused = false; return; }
+  if (k === "+" || k === "=") return zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
+  if (k === "-") return zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
+  if (k === "?") return helpWin();
+  const low = k.toLowerCase();
+  if (KEY_TOOLS[low]) return setTool(KEY_TOOLS[low]);
+  const w = { v: openShop, f: fleetWin, m: financeWin, g: graphsWin, c: companyWin }[low]; if (w) w();
+}
+function setupDesktop() {
+  window.addEventListener("keydown", onKey);
+  cv.addEventListener("contextmenu", e => { e.preventDefault(); setTool("inspect"); });
+}
+
 // -------------------------------------------------------------- menus & loop
 const SLOT = "tt-save-1", AUTO = "tt-auto";
 function saveNow(slot) {
@@ -5780,8 +5925,10 @@ function afterStart() {
   buildToolbar(); setTool("inspect"); resize();
   const t = S.map.towns[0]; if (t) { view.z = 1.1; centerOn(t.x, t.y); }
   $("#gameover").hidden = true;
+  ui.follow = null; MM.img = null; renderTutorial();
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
+function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
 
 const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
 function showMenu(first) {
@@ -5818,7 +5965,7 @@ function showMenu(first) {
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
+      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
@@ -5837,6 +5984,8 @@ function menuWin() {
     c.appendChild(btn("Quick save", () => { if (saveToSlot(SLOT, S.name)) toast("Saved."); }));
     c.appendChild(btn("Save and load…", () => { closeWin("menu"); savesWin(); }));
     c.appendChild(btn("Settings", () => { closeWin("menu"); settingsWin(); }));
+    c.appendChild(btn("Tutorial", () => { closeWin("menu"); tutorialStart(); }));
+    c.appendChild(btn("Keys and help", () => { closeWin("menu"); helpWin(); }));
     c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
     let armed = false;
     const rb = btn("Retire now", () => { if (!armed) { armed = true; rb.textContent = "Tap again to retire and see your score"; rb.classList.add("danger"); return; } closeAllWins(); endGame("retired"); });
@@ -5856,6 +6005,7 @@ function wireBars() {
   $("#bgraph").onclick = graphsWin;
   $("#bco").onclick = companyWin;
   $("#bnews").onclick = newsWin;
+  $("#bhelp").onclick = helpWin;
   $("#ticker").onclick = () => { if (ui.jump) centerOn(ui.jump.x, ui.jump.y); else newsWin(); };
   $("#zin").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
   $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
@@ -5881,8 +6031,10 @@ function frame(now) {
       if (dayAcc > 4) dayAcc = 0;
       autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
+    followTick();
     draw();
-    uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); if (S.gameOver) $("#gameover").hidden = false; }
+    drawMinimap(now);
+    uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); tutorialTick(); if (S.gameOver) $("#gameover").hidden = false; }
   }
   requestAnimationFrame(frame);
 }
@@ -6026,7 +6178,7 @@ function simulateDays(n) {
 
 // -------------------------------------------------------------- boot
 function boot() {
-  wireBars(); resize();
+  wireBars(); resize(); setupMinimap(); setupDesktop();
   if (S == null) { newGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 18, rivals: 0, startYear: 1950, seed: "7" }); buildToolbar(); resize(); centerOn(S.map.towns[0].x, S.map.towns[0].y); }
   showMenu(true);
   requestAnimationFrame(frame);
@@ -6634,6 +6786,26 @@ const TESTS = [
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 8, rivals: 0, startYear: 1950, seed: "64", water: 0.85, rivers: 4 }); const lots = wet();
     assert(lots > dry, "more water: " + dry + " vs " + lots);
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 160, towns: 26, rivals: 0, startYear: 1950, seed: "65" }); eq(S.map.w, 160, "huge map"); assert(S.map.towns.length >= 20, "towns on a huge map"); draw();
+  }],
+  ["polish", "Tutorial steps advance as you play", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = buildDemoLine("road", "passengers"); if (r.ok) break; }
+    const keep = prefs.tutorialDone; tutorialStart(); eq(S.tutorial.step, 0, "starts at step 1"); assert(!$("#tut").hidden, "card shown");
+    S.stats = { roads: 5 }; for (let k = 0; k < 4; k++) tutorialTick(); assert(S.tutorial.step >= 3, "road, stops and depot steps done: " + S.tutorial.step);
+    demoBuy(r, 1); for (let k = 0; k < 3; k++) tutorialTick(); assert(S.tutorial.step >= 5, "bus bought and orders checked: " + S.tutorial.step);
+    for (let d = 0; d < 120 && S.tutorial.step < 6; d++) { simulateDays(1); tutorialTick(); }
+    eq(S.tutorial.step, 6, "first passengers delivered"); tutorialStop(); assert($("#tut").hidden, "closed"); prefs.tutorialDone = keep; savePrefs();
+  }],
+  ["polish", "Minimap, follow a vehicle, keyboard shortcuts", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 1); if (r.ok) break; }
+    renderMinimapImage(); drawMinimap(performance.now()); assert(MM.img && MM.img.width === S.map.w, "minimap image");
+    for (const [x, y] of [[10, 20], [50, 50], [80, 5]]) { const p = mmPoint(x, y), t = mmToTile(p.x, p.y); assert(Math.abs(t.x - x) < 0.01 && Math.abs(t.y - y) < 0.01, "minimap maps back to the tile"); }
+    simulateDays(5); const v = r.vh; view.x = 9999; followVehicle(v); for (let k = 0; k < 60; k++) followTick();
+    const u = vehiclePos(v); assert(Math.abs(cssW / 2 - (view.x + u.x * view.z)) < 5, "view centred on the vehicle"); ui.follow = null;
+    const key = (k, o) => window.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: k }, o || {})));
+    key("r"); eq(ui.tool, "road"); key("t"); eq(ui.tool, "track"); key("Escape"); eq(ui.tool, "inspect");
+    key("f"); assert(openWins.fleet, "F opens Fleet"); key("Escape"); assert(!openWins.fleet, "Esc closes it");
+    key("?"); assert(openWins.help, "help window"); closeAllWins();
+    key("2"); eq(ui.speed, 2); key("1"); eq(ui.speed, 1);
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

@@ -601,6 +601,26 @@ const TESTS = [
     assert(lots > dry, "more water: " + dry + " vs " + lots);
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 160, towns: 26, rivals: 0, startYear: 1950, seed: "65" }); eq(S.map.w, 160, "huge map"); assert(S.map.towns.length >= 20, "towns on a huge map"); draw();
   }],
+  ["polish", "Tutorial steps advance as you play", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = buildDemoLine("road", "passengers"); if (r.ok) break; }
+    const keep = prefs.tutorialDone; tutorialStart(); eq(S.tutorial.step, 0, "starts at step 1"); assert(!$("#tut").hidden, "card shown");
+    S.stats = { roads: 5 }; for (let k = 0; k < 4; k++) tutorialTick(); assert(S.tutorial.step >= 3, "road, stops and depot steps done: " + S.tutorial.step);
+    demoBuy(r, 1); for (let k = 0; k < 3; k++) tutorialTick(); assert(S.tutorial.step >= 5, "bus bought and orders checked: " + S.tutorial.step);
+    for (let d = 0; d < 120 && S.tutorial.step < 6; d++) { simulateDays(1); tutorialTick(); }
+    eq(S.tutorial.step, 6, "first passengers delivered"); tutorialStop(); assert($("#tut").hidden, "closed"); prefs.tutorialDone = keep; savePrefs();
+  }],
+  ["polish", "Minimap, follow a vehicle, keyboard shortcuts", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 1); if (r.ok) break; }
+    renderMinimapImage(); drawMinimap(performance.now()); assert(MM.img && MM.img.width === S.map.w, "minimap image");
+    for (const [x, y] of [[10, 20], [50, 50], [80, 5]]) { const p = mmPoint(x, y), t = mmToTile(p.x, p.y); assert(Math.abs(t.x - x) < 0.01 && Math.abs(t.y - y) < 0.01, "minimap maps back to the tile"); }
+    simulateDays(5); const v = r.vh; view.x = 9999; followVehicle(v); for (let k = 0; k < 60; k++) followTick();
+    const u = vehiclePos(v); assert(Math.abs(cssW / 2 - (view.x + u.x * view.z)) < 5, "view centred on the vehicle"); ui.follow = null;
+    const key = (k, o) => window.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: k }, o || {})));
+    key("r"); eq(ui.tool, "road"); key("t"); eq(ui.tool, "track"); key("Escape"); eq(ui.tool, "inspect");
+    key("f"); assert(openWins.fleet, "F opens Fleet"); key("Escape"); assert(!openWins.fleet, "Esc closes it");
+    key("?"); assert(openWins.help, "help window"); closeAllWins();
+    key("2"); eq(ui.speed, 2); key("1"); eq(ui.speed, 1);
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;

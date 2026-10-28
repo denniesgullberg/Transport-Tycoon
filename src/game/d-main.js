@@ -16,8 +16,10 @@ function afterStart() {
   buildToolbar(); setTool("inspect"); resize();
   const t = S.map.towns[0]; if (t) { view.z = 1.1; centerOn(t.x, t.y); }
   $("#gameover").hidden = true;
+  ui.follow = null; MM.img = null; renderTutorial();
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
+function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
 
 const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
 function showMenu(first) {
@@ -54,7 +56,7 @@ function showMenu(first) {
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
+      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
@@ -73,6 +75,8 @@ function menuWin() {
     c.appendChild(btn("Quick save", () => { if (saveToSlot(SLOT, S.name)) toast("Saved."); }));
     c.appendChild(btn("Save and load…", () => { closeWin("menu"); savesWin(); }));
     c.appendChild(btn("Settings", () => { closeWin("menu"); settingsWin(); }));
+    c.appendChild(btn("Tutorial", () => { closeWin("menu"); tutorialStart(); }));
+    c.appendChild(btn("Keys and help", () => { closeWin("menu"); helpWin(); }));
     c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
     let armed = false;
     const rb = btn("Retire now", () => { if (!armed) { armed = true; rb.textContent = "Tap again to retire and see your score"; rb.classList.add("danger"); return; } closeAllWins(); endGame("retired"); });
@@ -92,6 +96,7 @@ function wireBars() {
   $("#bgraph").onclick = graphsWin;
   $("#bco").onclick = companyWin;
   $("#bnews").onclick = newsWin;
+  $("#bhelp").onclick = helpWin;
   $("#ticker").onclick = () => { if (ui.jump) centerOn(ui.jump.x, ui.jump.y); else newsWin(); };
   $("#zin").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
   $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
@@ -117,8 +122,10 @@ function frame(now) {
       if (dayAcc > 4) dayAcc = 0;
       autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
+    followTick();
     draw();
-    uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); if (S.gameOver) $("#gameover").hidden = false; }
+    drawMinimap(now);
+    uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); tutorialTick(); if (S.gameOver) $("#gameover").hidden = false; }
   }
   requestAnimationFrame(frame);
 }
@@ -262,7 +269,7 @@ function simulateDays(n) {
 
 // -------------------------------------------------------------- boot
 function boot() {
-  wireBars(); resize();
+  wireBars(); resize(); setupMinimap(); setupDesktop();
   if (S == null) { newGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 18, rivals: 0, startYear: 1950, seed: "7" }); buildToolbar(); resize(); centerOn(S.map.towns[0].x, S.map.towns[0].y); }
   showMenu(true);
   requestAnimationFrame(frame);

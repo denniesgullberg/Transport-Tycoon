@@ -77,7 +77,7 @@ function updateStatus() {
   $("#sdate").textContent = d.day + " " + EV.MONTH_NAMES[d.month] + " " + d.year;
   $("#scompany").textContent = "— " + S.name + " —";
   const mEl = $("#smoney"); mEl.textContent = money(S.company.cash); mEl.classList.toggle("neg", S.company.cash < 0);
-  $("#bpause").textContent = ui.paused ? "▶" : "⏸";
+  $("#bpause").textContent = ui.paused ? "▶" : "❚❚";
   document.querySelectorAll(".spd").forEach(b => b.classList.toggle("on", !ui.paused && +b.dataset.s === ui.speed));
   const n = EV.latestNews(S.news, 1)[0];
   $("#ticker").textContent = n ? n.text : "";
@@ -105,7 +105,7 @@ cv.addEventListener("pointermove", e => {
   if (!tap) return;
   if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
   if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
-  if (tap.moved) { view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
+  if (tap.moved) { ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
 });
 function endPtr(e) {
   const p = pos(e); ptrs.delete(e.pointerId);
@@ -210,6 +210,7 @@ function vehicleWin(vh) {
       acts.appendChild(ss);
       acts.appendChild(btn("Service", () => { const r = sendToDepot(vh, false); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + "."); }));
       acts.appendChild(btn("Stop in depot", () => { const r = sendToDepot(vh, true); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + " to stop there."); }));
+      acts.appendChild(btn("Follow", () => { followVehicle(vh); }));
       acts.appendChild(btn("Clone", () => { const r = cloneVehicle(vh); if (!r.ok) return toast(r.msg, true); toast("Cloned with the same orders."); vehicleWin(r.vh); }));
       const ro = refitOptions(vh);
       if (ro.length) {

@@ -48,12 +48,12 @@ li input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 <div class="wrap">
 <header>
   <h1>Transport &amp; Co. Roadmap</h1>
-  <p>Full check of the playable build on 28 October 2026, and the list of updates to work through one at a time. Tick items off as they land.</p>
+  <p>Full check of the playable build on 28 October 2026, and the 32 updates that came out of it. All six phases are now built, tested and live in the game.</p>
   <div class="counts">
-    <span class="count"><b>14</b> areas working</span>
-    <span class="count"><b>5</b> partly working</span>
+    <span class="count"><b>32</b> updates shipped</span>
+    <span class="count"><b>6</b> known limits</span>
     <span class="count"><b id="left">32</b> updates left</span>
-    <span class="count"><b>41</b> automated checks passing</span>
+    <span class="count"><b>67</b> automated checks passing</span>
   </div>
 </header>
 
@@ -75,13 +75,14 @@ li input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   <div class="cell ok"><b>Speed</b><span>10 game years simulate in under a second. Smooth on the largest map.</span></div>
 </div>
 
-<h2>Partly working</h2>
+<h2>Known limits</h2>
 <div class="grid">
-  <div class="cell part"><b>Trains look short</b><span>A train is one sprite on one tile, and passes through other trains. No signals yet.</span></div>
-  <div class="cell part"><b>Vehicles only face left or right</b><span>Sprites flip instead of turning to the four map directions.</span></div>
-  <div class="cell part"><b>Climates are paint only</b><span>Arctic, tropical and toyland change colours but use the same industries and cargo.</span></div>
-  <div class="cell part"><b>Sound</b><span>8 effects play. Train whistle and horn exist but are never used. No music or volume control.</span></div>
-  <div class="cell part"><b>Export save</b><span>The button does nothing inside the Claude viewer. There is no import.</span></div>
+  <div class="cell part"><b>Rivals stay on land</b><span>Rival companies run buses, trucks and trains, but not ships or aircraft.</span></div>
+  <div class="cell part"><b>Simple signals</b><span>Block signals, one-way and two-way. No path signals or pre-signals yet.</span></div>
+  <div class="cell part"><b>Aircraft never break down</b><span>Planes are serviced at every airport they land at, so they skip breakdowns.</span></div>
+  <div class="cell part"><b>Sprites are side views</b><span>Vehicles are slanted to follow roads and track in all four directions, not drawn from every angle.</span></div>
+  <div class="cell part"><b>Saves live in this browser</b><span>Use Export to file to keep a copy, or to move a game to another device.</span></div>
+  <div class="cell part"><b>One player</b><span>No multiplayer.</span></div>
 </div>
 
 <h2>Update list</h2>
@@ -154,9 +155,9 @@ li input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   <h3>Phase 6: polish</h3>
   <p class="why">Making it pleasant to pick up and play.</p>
   <ol start="30">
-    <li data-id="tutorial"><input type="checkbox" id="c-tutorial" aria-label="Done: Tutorial"><span class="n">30</span><div><div class="t">First-game tutorial</div><div class="d">Short guided steps: road, two stops, depot, first bus, first profit.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Help</span></div></div></li>
-    <li data-id="minimap"><input type="checkbox" id="c-minimap" aria-label="Done: Minimap"><span class="n">31</span><div><div class="t">Minimap and follow vehicle</div><div class="d">A small overview map to jump around, and a button to follow a vehicle.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Interface</span></div></div></li>
-    <li data-id="desktop"><input type="checkbox" id="c-desktop" aria-label="Done: Desktop layout"><span class="n">32</span><div><div class="t">Desktop and tablet layout</div><div class="d">A wider layout with the toolbar on the side, keyboard shortcuts and a right-click menu.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Interface</span></div></div></li>
+    <li data-id="tutorial" data-shipped><input type="checkbox" id="c-tutorial" aria-label="Done: Tutorial"><span class="n">30</span><div><div class="t">First-game tutorial</div><div class="d">Short guided steps: road, two stops, depot, first bus, first profit.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Help</span></div></div></li>
+    <li data-id="minimap" data-shipped><input type="checkbox" id="c-minimap" aria-label="Done: Minimap"><span class="n">31</span><div><div class="t">Minimap and follow vehicle</div><div class="d">A small overview map to jump around, and a button to follow a vehicle.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Interface</span></div></div></li>
+    <li data-id="desktop" data-shipped><input type="checkbox" id="c-desktop" aria-label="Done: Desktop layout"><span class="n">32</span><div><div class="t">Desktop and tablet layout</div><div class="d">A wider layout with the toolbar on the side, keyboard shortcuts and a right-click menu.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Interface</span></div></div></li>
   </ol>
 </section>
 
