@@ -21,9 +21,9 @@ function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart()
 
 const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "" };
 function showMenu(first) {
-  ui.menuOpen = true;
+  ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
-  const anySave = hasSave(AUTO) || hasSave(SLOT);
+  const anySave = savesList().length > 0;
   if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
   const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
   m.innerHTML = "<div class='mbox'><h1>Transport &amp; Co.</h1><p class='sub'>A road transport company in the style of the old classics</p>" +
@@ -38,6 +38,7 @@ function showMenu(first) {
     "<label>Start year</label><div class='chips'>" + [1950, 1970, 1990].map(n => opt("year", n, n)).join("") + "</div>" +
     "<label>Map seed</label><div class='row'><input id='seed' value='" + menuState.seed + "'><button class='gb sm' data-act='dice'>Random</button></div>" +
     "<button class='gb wide big go' data-act='start'>Start game</button>" +
+    "<div class='row'>" + (anySave ? "<button class='gb' data-act='saves'>Saved games</button>" : "") + "<button class='gb' data-act='import'>Import a save file</button></div>" +
     "<button class='gb wide' data-act='tests'>Open test panel</button>" +
     "</div></div>";
   m.onclick = e => {
@@ -49,20 +50,21 @@ function showMenu(first) {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
       startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed });
     }
-    if (a === "continue") { if (!(hasSave(AUTO) && loadSlot(AUTO))) loadSlot(SLOT); }
+    if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
+    if (a === "saves") savesWin();
+    if (a === "import") pickSaveFile();
     if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
   };
 }
-function hideMenu() { ui.menuOpen = false; $("#menu").hidden = true; }
+function hideMenu() { ui.menuOpen = false; document.body.classList.remove("menu-open"); $("#menu").hidden = true; }
 
 function menuWin() {
   openWin("menu", "Game menu", body => {
     body.innerHTML = "<div class='col'></div>";
     const c = body.firstChild;
-    c.appendChild(btn("Save game", () => saveNow(SLOT)));
-    c.appendChild(btn("Load saved game", () => loadSlot(SLOT)));
-    c.appendChild(btn(sound.muted ? "Sound: off" : "Sound: on", function () { sound.setMuted(!sound.muted); this.textContent = sound.muted ? "Sound: off" : "Sound: on"; }));
-    c.appendChild(btn("Export save to file", () => { try { syncPersist(); SV.exportToFile(S, "transport-co-save.json", S.name); } catch (e) { toast("Export is blocked here.", true); } }));
+    c.appendChild(btn("Quick save", () => { if (saveToSlot(SLOT, S.name)) toast("Saved."); }));
+    c.appendChild(btn("Save and load…", () => { closeWin("menu"); savesWin(); }));
+    c.appendChild(btn("Settings", () => { closeWin("menu"); settingsWin(); }));
     c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
     c.appendChild(btn("Main menu", () => { closeAllWins(); showMenu(); }));
   });
@@ -90,6 +92,7 @@ function wireBars() {
     const pan = 40; if (e.key === "ArrowLeft") view.x += pan; if (e.key === "ArrowRight") view.x -= pan; if (e.key === "ArrowUp") view.y += pan; if (e.key === "ArrowDown") view.y -= pan;
   });
   sound.attachUnlock && sound.attachUnlock(document.body);
+  applyPrefs();
 }
 
 let lastT = performance.now(), dayAcc = 0, autoT = 0, uiT = 0;
@@ -101,7 +104,7 @@ function frame(now) {
       moveVehicles(dd); dayAcc += dd;
       let g = 8; while (dayAcc >= 1 && g-- > 0) { dayAcc -= 1; dailyTick(); }
       if (dayAcc > 4) dayAcc = 0;
-      autoT += dt; if (autoT > 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
+      autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
     draw();
     uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); if (S.gameOver) $("#gameover").hidden = false; }

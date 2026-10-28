@@ -54,6 +54,7 @@ function buildToolbar() {
     const b = el("button", "tool" + (ui.tool === id ? " on" : ""), label); b.dataset.tool = id;
     b.onclick = () => { setTool(id); }; tb.appendChild(b);
   }
+  const u = el("button", "tool undo", "Undo"); u.id = "bundo"; u.onclick = () => { const r = undoLast(); toast(r.ok ? "Undone. Refunded " + money(r.cost) + "." : r.reason, !r.ok); }; tb.appendChild(u); updateUndoBtn();
 }
 function setTool(id) {
   ui.tool = id; ui.overlay = null;
@@ -79,14 +80,14 @@ function updateStatus() {
 
 // ---- input
 const ptrs = new Map();
-let tap = null, pinch = null, painting = false, lastPaint = null;
+let tap = null, pinch = null, painting = false;
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
 cv.addEventListener("pointerdown", e => {
   if (!S) return;
   cv.setPointerCapture(e.pointerId); const p = pos(e); ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; return; }
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; ui.plan = null; setTool(ui.tool); return; }
   tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now() };
-  if (ui.tool === "road" || ui.tool === "track") { painting = true; lastPaint = null; paintAt(p); }
+  if (ui.tool === "road" || ui.tool === "track") { painting = true; startPlan(screenToTile(p.x, p.y)); }
 });
 cv.addEventListener("pointermove", e => {
   const p = pos(e);
@@ -96,13 +97,14 @@ cv.addEventListener("pointermove", e => {
   if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; const nz = clamp(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, 0.45, 3); zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, nz); return; }
   if (!tap) return;
   if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
-  if (painting) { paintAt(p); ui.hover = screenToTile(p.x, p.y); return; }
+  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
   if (tap.moved) { view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
 });
 function endPtr(e) {
   const p = pos(e); ptrs.delete(e.pointerId);
   if (ptrs.size < 2) pinch = null;
-  if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
+  if (painting && ptrs.size === 0) commitPlan();
+  else if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
   if (ptrs.size === 0) { tap = null; painting = false; }
 }
 cv.addEventListener("pointerup", endPtr); cv.addEventListener("pointercancel", endPtr);
@@ -113,15 +115,6 @@ function updateOverlay() {
   const t = ui.hover; if (!t || !S) return;
   if (ui.tool === "busStop" || ui.tool === "truckStop" || ui.tool === "trainStation") ui.overlay = new Set(ST.previewCatchment(ui.tool, t.x, t.y, S.map.w, S.map.h).map(q => q.y * S.map.w + q.x));
 }
-function paintAt(p) {
-  const t = screenToTile(p.x, p.y); if (!t) return;
-  const from = lastPaint || t;
-  const pts = []; let x = from.x, y = from.y;
-  while (x !== t.x || y !== t.y) { if (Math.abs(t.x - x) >= Math.abs(t.y - y)) x += Math.sign(t.x - x); else y += Math.sign(t.y - y); pts.push({ x, y }); }
-  if (!lastPaint) pts.unshift(t);
-  for (const q of pts) { const r = ui.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y); if (!r.ok) { toast(r.reason, true); break; } if (r.cost) sound.play("click"); }
-  lastPaint = t;
-}
 function onTap(p) {
   const t = screenToTile(p.x, p.y); if (!t) return;
   ui.hover = t;
@@ -129,20 +122,22 @@ function onTap(p) {
   if (tool === "inspect") return inspectAt(p, t);
   if (tool === "road") { const r = buildRoadTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
   if (tool === "track") { const r = buildTrackTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
-  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return; }
-  if (tool === "railDepot") { const r = placeDepot(t.x, t.y, "rail"); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "station", id: r.station.id, cost: r.cost }); sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return; }
+  if (tool === "railDepot") { const r = placeDepot(t.x, t.y, "rail"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
   if (tool === "busStop" || tool === "truckStop") {
     const r = placeStation(t.x, t.y, tool, "player"); if (!r.ok) return toast(r.reason, true);
+    pushUndo({ kind: "station", id: r.station.id, cost: r.cost });
     sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return;
   }
-  if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.depot.name + " built."); return; }
-  if (tool === "bridge") { const r = buildCrossing(t.x, t.y); if (!r.ok) return toast(r.reason, true); toast("Built a " + r.span.kind + " (" + r.span.length + " tiles) for " + money(r.span.cost) + "."); return; }
+  if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "bridge") { const r = buildCrossing(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "crossing", net: r.net, tiles: r.added, cost: r.span.cost }); toast("Built a " + r.span.kind + " (" + r.span.length + " tiles) for " + money(r.span.cost) + "."); return; }
   if (tool === "raise" || tool === "lower") {
     const f = tool === "raise" ? terrain.raiseTile : terrain.lowerTile;
+    const h0 = S.map.height.slice(), w0 = S.map.water.slice();
     const r = f(S.map, t.x, t.y, S.inflation * S.settings.cost);
     if (!r.ok) return toast(r.reason || "Cannot do that here.", true);
-    if (S.company.cash < r.cost) { toast("Not enough money.", true); return; }
-    spend("construction", r.cost); sound.play("build"); return;
+    if (S.company.cash < r.cost) { S.map.height.set(h0); S.map.water.set(w0); toast("Not enough money. That costs " + money(r.cost) + ".", true); return; }
+    spend("construction", r.cost); pushUndo({ kind: "terrain", changes: terrainDiff(h0, w0), cost: r.cost }); sound.play("build"); return;
   }
   if (tool === "bulldoze") { const r = bulldoze(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("demolish"); return; }
 }

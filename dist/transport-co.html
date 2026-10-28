@@ -56,6 +56,11 @@ input,select{font:inherit;padding:5px;border:2px solid var(--line);border-radius
 .tag{background:var(--olive2);color:#f6efc0;font-size:11px;padding:0 5px;border-radius:2px}.small{font-size:11px;margin-top:2px}
 .mats{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:4px 0}.mat{display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;background:var(--panel2);border:2px solid var(--line);border-radius:3px;padding:4px 6px;font:inherit;font-size:12px;color:var(--ink);cursor:pointer;min-width:0}.mat.on{background:#dfe6a8;border-color:#2c3312}.mat.none{opacity:.6}.mat .ms svg{height:20px;max-width:100%}.mat .dim{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .list.short{max-height:118px}
+body.menu-open #wins{z-index:110}
+.set{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dotted var(--line);min-height:34px}.set input[type=range]{flex:1;min-width:0}.set select{margin-left:auto}.set input[type=checkbox]{width:20px;height:20px;accent-color:var(--olive2)}
+.saves{display:flex;flex-direction:column;gap:5px;margin:6px 0}.sv{border:1px solid var(--line);border-radius:3px;background:#efe9c4;padding:6px}.svn{display:flex;flex-direction:column}.svn span{font-size:12px}.sv button{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);background:var(--panel2);border-radius:2px;cursor:pointer;color:var(--ink);min-height:30px}.sv button.armed{background:var(--red);color:#fff;border-color:var(--red)}
+.tool.undo{margin-left:6px;background:var(--panel)}.tool.undo:disabled{opacity:.45}
+input[type=range]{accent-color:var(--olive2)}
 </style>
 <div id="app">
   <div id="topbar"><span id="sdate">—</span><span id="scompany">—</span><span id="smoney">£0</span></div>
@@ -2803,6 +2808,12 @@ input,select{font:inherit;padding:5px;border:2px solid var(--line);border-radius
     master = null;
     _muted = false;
     _volume = 0.4;
+    musicGain = null;
+    musicTimer = null;
+    _music = false;
+    _musicVolume = 0.25;
+    nextBeat = 0;
+    beat = 0;
     constructor() {
       try {
         this._muted = localStorage.getItem(STORAGE_KEY) === "1";
@@ -2813,6 +2824,7 @@ input,select{font:inherit;padding:5px;border:2px solid var(--line);border-radius
     attachUnlock() {
       const unlock = () => {
         this.ensure();
+        if (this._music) this.startMusic();
         window.removeEventListener("pointerdown", unlock);
         window.removeEventListener("keydown", unlock);
       };
@@ -2844,6 +2856,65 @@ input,select{font:inherit;padding:5px;border:2px solid var(--line);border-radius
       } catch {
       }
       if (this.master) this.master.gain.value = m ? 0 : this._volume;
+    }
+    // ----------------------------------------------------------------- music
+    // A gentle looping tune built from a chord progression, scheduled a little ahead.
+    get music() {
+      return this._music;
+    }
+    setMusic(on) {
+      this._music = on;
+      if (on) this.startMusic();
+      else this.stopMusic();
+    }
+    setMusicVolume(v) {
+      this._musicVolume = Math.max(0, Math.min(1, v));
+      if (this.musicGain) this.musicGain.gain.value = this._musicVolume;
+    }
+    startMusic() {
+      if (this.musicTimer || !this.ctx) return;
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = this._musicVolume;
+      this.musicGain.connect(this.ctx.destination);
+      this.nextBeat = this.ctx.currentTime + 0.1;
+      this.beat = 0;
+      this.musicTimer = setInterval(() => this.scheduleMusic(), 200);
+    }
+    stopMusic() {
+      if (this.musicTimer) clearInterval(this.musicTimer);
+      this.musicTimer = null;
+      if (this.musicGain) {
+        this.musicGain.disconnect();
+        this.musicGain = null;
+      }
+    }
+    scheduleMusic() {
+      if (!this.ctx || !this.musicGain) return;
+      const spb = 60 / 96 / 2;
+      const roots = [48, 45, 41, 43];
+      const tune = [0, 4, 7, 4, 9, 7, 4, 2, 0, 3, 7, 3, 5, 3, 0, -1, 0, 4, 9, 7, 5, 4, 2, 4, 2, 5, 7, 11, 9, 7, 5, 2];
+      while (this.nextBeat < this.ctx.currentTime + 0.6) {
+        const bar = Math.floor(this.beat / 16) % 4, step = this.beat % 32;
+        const root = roots[bar], t = this.nextBeat - this.ctx.currentTime;
+        if (this.beat % 4 === 0) this.note(root - 12, spb * 3.6, "triangle", 0.5, t);
+        if (this.beat % 2 === 0) this.note(root + 12 + tune[step], spb * 1.7, "square", 0.08, t);
+        if (this.beat % 8 === 4) this.note(root + 7, spb * 3, "sine", 0.18, t);
+        this.nextBeat += spb;
+        this.beat++;
+      }
+    }
+    note(midi, dur, type, vol, delay) {
+      if (!this.ctx || !this.musicGain) return;
+      const t0 = this.ctx.currentTime + Math.max(0, delay), f = 440 * Math.pow(2, (midi - 69) / 12);
+      const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = f;
+      g.gain.setValueAtTime(1e-4, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(1e-4, t0 + dur);
+      osc.connect(g).connect(this.musicGain);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.05);
     }
     setVolume(v) {
       this._volume = Math.max(0, Math.min(1, v));
@@ -2999,7 +3070,7 @@ function newGame(cfg) {
 }
 
 function initRuntime() {
-  R = { roads: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), rail: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), sprites: {}, towns: null, bld: new Map(), indAt: new Map(), stationAt: new Map(), depotAt: new Map(), pending: [] };
+  R = { roads: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), rail: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), sprites: {}, towns: null, bld: new Map(), indAt: new Map(), stationAt: new Map(), depotAt: new Map(), pending: [], floats: [], undo: [], lastHorn: 0 };
   const m = S.map;
   if (S.roadTiles.length) for (const p of S.roadTiles) R.roads.addRoad(p.x, p.y);
   else for (const t of m.towns) for (const r of t.roads) R.roads.addRoad(r.x, r.y);
@@ -3176,7 +3247,7 @@ function dock(vh, dest) {
     S.company.cash += inc; post(cat, inc); S.qIncome += inc;
     if (vh.cargo === "passengers") S.metrics.passengers += vh.loaded; else S.metrics.cargo += vh.loaded;
     S.metrics.quarterCargo += vh.loaded;
-    if (vh.owner === "player") { vh.profit.thisYear += inc; vh.profit.lifetime += inc; if (inc > 40) sound.play("cash"); }
+    if (vh.owner === "player") { vh.profit.thisYear += inc; vh.profit.lifetime += inc; floatText(st.x, st.y, "+" + money(inc)); if (inc > 40) sound.play("cash"); }
     else { const rv = S.rivals.find(r => r.ai.id === vh.owner); if (rv) { const route = rv.ai.routes.find(x => x.fromStation === from.id && x.toStation === st.id); if (route) AI.recordIncome(rv.ai, route.id, inc); else rv.ai.cash += inc; } }
     // deliver raw cargo to industries that use it
     for (const i of covered(st).inds) if ((CARGO_TO_IND[vh.cargo] || []).includes(i.kind)) { i.input[vh.cargo] = (i.input[vh.cargo] || 0) + vh.loaded; i.received = i.received || {}; i.received[vh.cargo] = (i.received[vh.cargo] || 0) + vh.loaded; break; }
@@ -3209,7 +3280,7 @@ function dailyVehicle(vh) {
         }
       }
     }
-    if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; tryStep(vh); }
+    if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; if (vh.owner === "player") departSound(vh); tryStep(vh); }
   }
 }
 function depotsExist() { return S.depots.length > 0; }
@@ -3434,13 +3505,15 @@ function buildCrossing(x, y) {
   if (S.company.cash < sp.cost) return { ok: false, reason: "A " + sp.kind + " here costs " + money(sp.cost) + ". Not enough money." };
   const dx = Math.sign(sp.endX - x), dy = Math.sign(sp.endY - y), h0 = S.map.height[key(x, y)];
   spend("construction", sp.cost);
+  const added = [];
   for (let k = 1; k <= sp.length + 1; k++) {
     const tx = x + dx * k, ty = y + dy * k, i = key(tx, ty);
     if (k <= sp.length) S.spans[i] = { kind: sp.kind, h: h0 };
+    if (!net.hasRoad(tx, ty)) added.push({ x: tx, y: ty });
     S.map.occupied[i] = 1; net.addRoad(tx, ty);
   }
   sound.play("build");
-  return { ok: true, span: sp };
+  return { ok: true, span: sp, added, net: net === R.roads ? "road" : "rail" };
 }
 
 // ---------------------------------------------------------------------- rivals
@@ -3597,7 +3670,7 @@ function drawIndustry(px, py, ind) {
   } else if (ind.kind === "sawmill") {
     for (let k = 0; k < 3; k++) { ctx.fillStyle = "#8a5a2b"; ctx.fillRect(px - 16 + k * 11, top + 2, 9, 5); }
   }
-  if (view.z >= 1.1) label(px, top - (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory" ? 40 : 22), ind.name, 9);
+  if (prefs.labels && view.z >= 1.1) label(px, top - (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory" ? 40 : 22), ind.name, 9);
 }
 function label(px, py, text, size, col) {
   ctx.font = "bold " + size + "px Verdana, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(20,30,10,.8)";
@@ -3690,6 +3763,7 @@ function draw() {
         if (x + 1 < m.w) { const d = h - m.height[i + 1]; if (d > 0) poly([p.x + TW / 2, p.y, p.x, p.y + TH / 2, p.x, p.y + TH / 2 + d * HS, p.x + TW / 2, p.y + d * HS], pal.wall[h][0]); }
         if (y + 1 < m.h) { const d = h - m.height[i + m.w]; if (d > 0) poly([p.x - TW / 2, p.y, p.x, p.y + TH / 2, p.x, p.y + TH / 2 + d * HS, p.x - TW / 2, p.y + d * HS], pal.wall[h][1]); }
       }
+      if (prefs.grid) { ctx.strokeStyle = "rgba(0,0,0,.13)"; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(p.x, p.y - TH / 2); ctx.lineTo(p.x + TW / 2, p.y); ctx.lineTo(p.x, p.y + TH / 2); ctx.lineTo(p.x - TW / 2, p.y); ctx.closePath(); ctx.stroke(); }
       if (ov && ov.has(i)) diamond(p.x, p.y, "rgba(255,230,80,.28)", 0.98);
       const rd = R.roads.hasRoad(x, y), rl = !rd && R.rail.hasRoad(x, y);
       const ph = (rd || rl) && S.spans[i] ? iso(x, y, S.spans[i].h) : p;
@@ -3702,6 +3776,8 @@ function draw() {
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
     }
   }
+  // planned road or track while dragging
+  if (ui.plan && ui.plan.tiles) for (const q of ui.plan.tiles) { if (!inB(q.x, q.y)) continue; const p = iso(q.x, q.y, tileH(q.x, q.y)); diamond(p.x, p.y, q.st === "bad" ? "rgba(220,60,40,.5)" : q.st === "have" ? "rgba(255,255,255,.22)" : "rgba(120,230,90,.5)", 0.9); }
   // hover / selected tile
   if (ui.hover && inB(ui.hover.x, ui.hover.y)) {
     const t = ui.hover, p = iso(t.x, t.y, tileH(t.x, t.y));
@@ -3711,11 +3787,15 @@ function draw() {
   const vs = S.vehicles.filter(v => !(S.spans[key(v.tile.x, v.tile.y)] || {}).kind || S.spans[key(v.tile.x, v.tile.y)].kind !== "tunnel").map(v => ({ v, pos: vehiclePos(v) })).sort((a, b) => (a.pos.gx + a.pos.gy) - (b.pos.gx + b.pos.gy));
   for (const { v, pos } of vs) drawVehicle(v, pos);
   // labels
-  if (view.z >= 0.7) for (const t of m.towns) {
+  if (prefs.labels && view.z >= 0.7) for (const t of m.towns) {
     if (t.x < x0 || t.x > x1 || t.y < y0 || t.y > y1) continue;
     const p = iso(t.x, t.y, tileH(t.x, t.y));
     label(p.x, p.y - 24 - (t.size === "city" ? 20 : 0), t.name, t.size === "city" ? 13 : 11);
   }
+  // income pop-ups rise and fade over 1.6 s
+  const now = performance.now();
+  R.floats = R.floats.filter(f => now - f.t < 1600);
+  for (const f of R.floats) { const a = (now - f.t) / 1600, p = iso(f.x, f.y, tileH(f.x, f.y)); ctx.globalAlpha = 1 - a * a; label(p.x, p.y - 30 - a * 26, f.text, 11, f.color); ctx.globalAlpha = 1; }
 }
 function vehiclePos(v) {
   let gx = v.tile.x, gy = v.tile.y;
@@ -3802,6 +3882,7 @@ function buildToolbar() {
     const b = el("button", "tool" + (ui.tool === id ? " on" : ""), label); b.dataset.tool = id;
     b.onclick = () => { setTool(id); }; tb.appendChild(b);
   }
+  const u = el("button", "tool undo", "Undo"); u.id = "bundo"; u.onclick = () => { const r = undoLast(); toast(r.ok ? "Undone. Refunded " + money(r.cost) + "." : r.reason, !r.ok); }; tb.appendChild(u); updateUndoBtn();
 }
 function setTool(id) {
   ui.tool = id; ui.overlay = null;
@@ -3827,14 +3908,14 @@ function updateStatus() {
 
 // ---- input
 const ptrs = new Map();
-let tap = null, pinch = null, painting = false, lastPaint = null;
+let tap = null, pinch = null, painting = false;
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
 cv.addEventListener("pointerdown", e => {
   if (!S) return;
   cv.setPointerCapture(e.pointerId); const p = pos(e); ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; return; }
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; ui.plan = null; setTool(ui.tool); return; }
   tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now() };
-  if (ui.tool === "road" || ui.tool === "track") { painting = true; lastPaint = null; paintAt(p); }
+  if (ui.tool === "road" || ui.tool === "track") { painting = true; startPlan(screenToTile(p.x, p.y)); }
 });
 cv.addEventListener("pointermove", e => {
   const p = pos(e);
@@ -3844,13 +3925,14 @@ cv.addEventListener("pointermove", e => {
   if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; const nz = clamp(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, 0.45, 3); zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, nz); return; }
   if (!tap) return;
   if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
-  if (painting) { paintAt(p); ui.hover = screenToTile(p.x, p.y); return; }
+  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
   if (tap.moved) { view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
 });
 function endPtr(e) {
   const p = pos(e); ptrs.delete(e.pointerId);
   if (ptrs.size < 2) pinch = null;
-  if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
+  if (painting && ptrs.size === 0) commitPlan();
+  else if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
   if (ptrs.size === 0) { tap = null; painting = false; }
 }
 cv.addEventListener("pointerup", endPtr); cv.addEventListener("pointercancel", endPtr);
@@ -3861,15 +3943,6 @@ function updateOverlay() {
   const t = ui.hover; if (!t || !S) return;
   if (ui.tool === "busStop" || ui.tool === "truckStop" || ui.tool === "trainStation") ui.overlay = new Set(ST.previewCatchment(ui.tool, t.x, t.y, S.map.w, S.map.h).map(q => q.y * S.map.w + q.x));
 }
-function paintAt(p) {
-  const t = screenToTile(p.x, p.y); if (!t) return;
-  const from = lastPaint || t;
-  const pts = []; let x = from.x, y = from.y;
-  while (x !== t.x || y !== t.y) { if (Math.abs(t.x - x) >= Math.abs(t.y - y)) x += Math.sign(t.x - x); else y += Math.sign(t.y - y); pts.push({ x, y }); }
-  if (!lastPaint) pts.unshift(t);
-  for (const q of pts) { const r = ui.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y); if (!r.ok) { toast(r.reason, true); break; } if (r.cost) sound.play("click"); }
-  lastPaint = t;
-}
 function onTap(p) {
   const t = screenToTile(p.x, p.y); if (!t) return;
   ui.hover = t;
@@ -3877,20 +3950,22 @@ function onTap(p) {
   if (tool === "inspect") return inspectAt(p, t);
   if (tool === "road") { const r = buildRoadTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
   if (tool === "track") { const r = buildTrackTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
-  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return; }
-  if (tool === "railDepot") { const r = placeDepot(t.x, t.y, "rail"); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "station", id: r.station.id, cost: r.cost }); sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return; }
+  if (tool === "railDepot") { const r = placeDepot(t.x, t.y, "rail"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
   if (tool === "busStop" || tool === "truckStop") {
     const r = placeStation(t.x, t.y, tool, "player"); if (!r.ok) return toast(r.reason, true);
+    pushUndo({ kind: "station", id: r.station.id, cost: r.cost });
     sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return;
   }
-  if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.depot.name + " built."); return; }
-  if (tool === "bridge") { const r = buildCrossing(t.x, t.y); if (!r.ok) return toast(r.reason, true); toast("Built a " + r.span.kind + " (" + r.span.length + " tiles) for " + money(r.span.cost) + "."); return; }
+  if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "bridge") { const r = buildCrossing(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "crossing", net: r.net, tiles: r.added, cost: r.span.cost }); toast("Built a " + r.span.kind + " (" + r.span.length + " tiles) for " + money(r.span.cost) + "."); return; }
   if (tool === "raise" || tool === "lower") {
     const f = tool === "raise" ? terrain.raiseTile : terrain.lowerTile;
+    const h0 = S.map.height.slice(), w0 = S.map.water.slice();
     const r = f(S.map, t.x, t.y, S.inflation * S.settings.cost);
     if (!r.ok) return toast(r.reason || "Cannot do that here.", true);
-    if (S.company.cash < r.cost) { toast("Not enough money.", true); return; }
-    spend("construction", r.cost); sound.play("build"); return;
+    if (S.company.cash < r.cost) { S.map.height.set(h0); S.map.water.set(w0); toast("Not enough money. That costs " + money(r.cost) + ".", true); return; }
+    spend("construction", r.cost); pushUndo({ kind: "terrain", changes: terrainDiff(h0, w0), cost: r.cost }); sound.play("build"); return;
   }
   if (tool === "bulldoze") { const r = bulldoze(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("demolish"); return; }
 }
@@ -4295,6 +4370,189 @@ function fleetWin() {
   }, { live: 1500 });
 }
 
+// ---------------------------------------------------------------- preferences
+// Per-player settings kept in this browser only.
+const PREFS_KEY = "tt-prefs";
+const prefs = Object.assign({ sounds: true, volume: 0.4, music: false, musicVolume: 0.25, autosaveMin: 1, labels: true, grid: false }, (() => {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {}; } catch (e) { return {}; }
+})());
+function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* storage blocked: settings last for this visit */ } }
+function applyPrefs() {
+  sound.setVolume(prefs.volume); sound.setMuted(!prefs.sounds);
+  if (sound.setMusicVolume) sound.setMusicVolume(prefs.musicVolume);
+  if (sound.setMusic) sound.setMusic(prefs.music);
+}
+const esc = (t) => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+function settingsWin() {
+  openWin("settings", "Settings", body => {
+    const pct = v => Math.round(v * 100);
+    body.innerHTML =
+      "<label class='set'><input type='checkbox' id='set-sounds'" + (prefs.sounds ? " checked" : "") + "> Sound effects</label>" +
+      "<label class='set'>Effects volume <input type='range' id='set-volume' min='0' max='100' value='" + pct(prefs.volume) + "'></label>" +
+      "<label class='set'><input type='checkbox' id='set-music'" + (prefs.music ? " checked" : "") + "> Music</label>" +
+      "<label class='set'>Music volume <input type='range' id='set-musicVolume' min='0' max='100' value='" + pct(prefs.musicVolume) + "'></label>" +
+      "<label class='set'>Autosave <select id='set-autosave'>" + [[0, "Off"], [1, "Every minute"], [2, "Every 2 minutes"], [5, "Every 5 minutes"]].map(([v, l]) => "<option value='" + v + "'" + (prefs.autosaveMin === v ? " selected" : "") + ">" + l + "</option>").join("") + "</select></label>" +
+      "<label class='set'><input type='checkbox' id='set-labels'" + (prefs.labels ? " checked" : "") + "> Town and industry names</label>" +
+      "<label class='set'><input type='checkbox' id='set-grid'" + (prefs.grid ? " checked" : "") + "> Grid lines</label>";
+    body.oninput = body.onchange = e => {
+      const t = e.target, k = t.id.replace("set-", "");
+      if (k === "volume" || k === "musicVolume") prefs[k] = +t.value / 100;
+      else if (k === "autosave") prefs.autosaveMin = +t.value;
+      else if (k in prefs) prefs[k] = t.checked;
+      savePrefs(); applyPrefs();
+      if (e.type === "change" && (k === "sounds" || k === "volume")) sound.play("click");
+    };
+  });
+}
+
+// ---------------------------------------------------------- income pop-ups
+function floatText(x, y, text, color) { if (R) R.floats.push({ x, y, text, color: color || "#ffe26b", t: performance.now() }); }
+function departSound(vh) {
+  const now = performance.now(); if (now - (R.lastHorn || 0) < 1500) return;
+  R.lastHorn = now; sound.play(isTrain(vh) && tractionOf(vh) === "steam" ? "whistle" : "horn");
+}
+
+// ------------------------------------------------------------------- undo
+// Building actions the player can take back, newest last. Each refunds what it cost.
+const UNDO_MAX = 25;
+function pushUndo(a) { R.undo.push(a); if (R.undo.length > UNDO_MAX) R.undo.shift(); updateUndoBtn(); }
+function vehicleOnTile(net, x, y) { return S.vehicles.some(v => netOf(v) === net && ((v.tile.x === x && v.tile.y === y) || (v.state === "moving" && v.to.x === x && v.to.y === y))); }
+function refund(c) { if (c > 0) { S.company.cash += c; post("construction", c); } }
+function undoLast() {
+  const a = R.undo[R.undo.length - 1]; if (!a) return { ok: false, reason: "Nothing to undo." };
+  const m = S.map;
+  if (a.kind === "road" || a.kind === "track" || a.kind === "crossing") {
+    const net = a.kind === "road" || a.net === "road" ? R.roads : R.rail;
+    for (const t of a.tiles) {
+      const i = key(t.x, t.y);
+      if (R.stationAt.has(i) || R.depotAt.has(i)) return { ok: false, reason: "Remove the stop or depot on that stretch first." };
+      if (vehicleOnTile(net, t.x, t.y)) return { ok: false, reason: "A vehicle is on that stretch. Try again in a moment." };
+    }
+    for (const t of a.tiles) { const i = key(t.x, t.y); net.removeRoad(t.x, t.y); m.occupied[i] = 0; delete S.spans[i]; }
+  } else if (a.kind === "station") {
+    const st = stationById(a.id); if (!st) { R.undo.pop(); updateUndoBtn(); return { ok: false, reason: "That stop is already gone." }; }
+    S.stations = S.stations.filter(s => s !== st); R.stationAt.delete(key(st.x, st.y)); for (const v of S.vehicles) OR.dropStation(v.orders, st.id);
+  } else if (a.kind === "depot") {
+    const d = depotById(a.id); if (!d) { R.undo.pop(); updateUndoBtn(); return { ok: false, reason: "That depot is already gone." }; }
+    S.depots = S.depots.filter(x => x !== d); R.depotAt.delete(key(d.x, d.y));
+  } else if (a.kind === "terrain") {
+    for (const c of a.changes) if (m.occupied[c.i]) return { ok: false, reason: "Something has been built on that land since." };
+    for (const c of a.changes) { m.height[c.i] = c.h; m.water[c.i] = c.w; }
+  }
+  R.undo.pop(); refund(a.cost); updateUndoBtn(); sound.play("demolish");
+  return { ok: true, kind: a.kind, cost: a.cost };
+}
+function updateUndoBtn() { const b = document.getElementById("bundo"); if (b) b.disabled = !R || !R.undo.length; }
+
+// Terrain changes as a list of tiles that differ, so undo restores only those.
+function terrainDiff(beforeH, beforeW) {
+  const m = S.map, out = [];
+  for (let i = 0; i < m.height.length; i++) if (m.height[i] !== beforeH[i] || m.water[i] !== beforeW[i]) out.push({ i, h: beforeH[i], w: beforeW[i] });
+  return out;
+}
+
+// --------------------------------------------------- drag-to-build preview
+// Road and track are planned while the finger is down and built when it lifts.
+function planTiles(a, b) {
+  const pts = [{ x: a.x, y: a.y }]; let x = a.x, y = a.y;
+  while (x !== b.x) { x += Math.sign(b.x - x); pts.push({ x, y }); }
+  while (y !== b.y) { y += Math.sign(b.y - y); pts.push({ x, y }); }
+  return pts;
+}
+function startPlan(t) { if (!t) return; ui.plan = { tool: ui.tool, start: t, end: t }; refreshPlan(); }
+function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); }
+function refreshPlan() {
+  const p = ui.plan, track = p.tool === "track", unit = cost(track ? TRACK_COST : ROAD_COST);
+  let total = 0, fresh = 0, bad = 0, blocked = false;
+  p.tiles = planTiles(p.start, p.end).map(q => {
+    const why = track ? canBuildTrackOn(q.x, q.y) : canBuildRoadOn(q.x, q.y);
+    if (why === "exists") return { ...q, st: "have" };
+    if (why || blocked) { blocked = true; bad++; return { ...q, st: "bad", why }; }
+    const c = unit + (S.map.forest[key(q.x, q.y)] ? cost(CLEAR_TREE) : 0); total += c; fresh++;
+    return { ...q, st: "ok", c };
+  });
+  p.cost = total;
+  const name = track ? "Track" : "Road";
+  $("#hint").textContent = fresh || bad ? name + ": " + fresh + " new tile" + (fresh === 1 ? "" : "s") + ", " + money(total) + (bad ? ". Stops before a blocked tile." : "") + (total > S.company.cash ? " Not enough money." : "") : name + ": already built here.";
+}
+function commitPlan() {
+  const p = ui.plan; ui.plan = null; if (!p || !p.tiles) return;
+  const built = []; let spent = 0;
+  for (const q of p.tiles) {
+    if (q.st === "bad") { if (q.why && q.why !== "exists") toast(q.why, true); break; }
+    if (q.st !== "ok") continue;
+    const r = p.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y);
+    if (!r.ok) { toast(r.reason, true); break; }
+    if (r.cost) { built.push({ x: q.x, y: q.y }); spent += r.cost; }
+  }
+  if (built.length) { pushUndo({ kind: p.tool === "track" ? "track" : "road", tiles: built, cost: spent }); sound.play("build"); toast("Built " + built.length + " tile" + (built.length === 1 ? "" : "s") + " for " + money(spent) + "."); }
+  setTool(ui.tool);
+}
+
+// ------------------------------------------------------------ save and load
+function savesList() { try { return SV.listSaves().slice().sort((a, b) => b.savedAt - a.savedAt); } catch (e) { return []; } }
+function saveLabel(name) { return (name || S.name).trim().slice(0, 40) + " · " + EV.MONTH_NAMES[S.date.month].slice(0, 3) + " " + S.date.year; }
+function saveToSlot(slot, name) {
+  syncPersist();
+  try { const r = SV.saveGame(slot, S, saveLabel(name)); if (!r.ok) { toast(r.error || "Could not save.", true); return false; } } catch (e) { toast("Saving is blocked in this browser.", true); return false; }
+  return true;
+}
+function startLoaded(st) {
+  if (!st || !st.map || !st.company || !st.date) { toast("That is not a Transport & Co. save.", true); return false; }
+  S = st; if (!S.railTiles) S.railTiles = []; initRuntime(); ui.paused = false; closeAllWins(); hideMenu(); afterStart(); return true;
+}
+function importSaveText(text) {
+  let st = null;
+  try { st = SV.deserialize(text).state; } catch (e) { toast("Could not read that file.", true); return false; }
+  if (!startLoaded(st)) return false;
+  toast("Save file loaded."); return true;
+}
+async function exportSave() {
+  syncPersist();
+  const label = saveLabel(), text = SV.serialize(S, label);
+  const filename = "transport-co-" + S.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() + "-" + S.date.year + ".json";
+  let dl = null;
+  try { dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; } catch (e) { dl = null; }
+  if (dl) {
+    try { await dl.save({ filename, data: text }); toast("Save file ready."); }
+    catch (e) { if (!e || e.code !== "declined") toast(e && e.code === "rate_limited" ? "A save prompt is already open." : "Could not save the file here.", true); }
+    return;
+  }
+  try { SV.exportToFile(S, filename, label); toast("Save file downloaded."); } catch (e) { toast("Saving a file is blocked here.", true); }
+}
+function pickSaveFile() {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
+  inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) f.text().then(importSaveText); };
+  inp.click();
+}
+function savesWin() {
+  let armed = null;
+  openWin("saves", "Save and load", body => {
+    function render() {
+      const live = S && !ui.menuOpen, list = savesList(), when = ms => new Date(ms).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+      let h = live ? "<div class='row'><input id='savename' maxlength='40' value='" + esc(S.name) + "' aria-label='Save name'><button class='gb sm' data-a='new'>Save new</button></div>" : "";
+      h += list.length ? "<div class='saves'>" + list.map(sv => "<div class='sv'><div class='svn'><b>" + esc(sv.slot === AUTO ? "Autosave" : sv.label.split(" · ")[0]) + "</b><span class='dim'>" + esc(sv.label.split(" · ")[1] || "") + " · saved " + when(sv.savedAt) + "</span></div><div class='row'>" +
+        "<button data-a='load' data-s='" + esc(sv.slot) + "'>Load</button>" + (live && sv.slot !== AUTO ? "<button data-a='over' data-s='" + esc(sv.slot) + "'>Overwrite</button>" : "") +
+        "<button data-a='del' data-s='" + esc(sv.slot) + "' class='" + (armed === sv.slot ? "armed" : "") + "'>" + (armed === sv.slot ? "Tap again to delete" : "Delete") + "</button></div></div>").join("") + "</div>" : "<p class='dim'>No saved games yet.</p>";
+      h += "<h4>Files</h4><div class='row'>" + (live ? "<button class='gb sm' data-a='export'>Export to file</button>" : "") + "<button class='gb sm' data-a='import'>Import a save file</button></div>";
+      body.innerHTML = h;
+    }
+    body.onclick = e => {
+      const b = e.target.closest("button"); if (!b || !b.dataset.a) return; const a = b.dataset.a, slot = b.dataset.s;
+      if (a !== "del") armed = null;
+      if (a === "new") { const n = (body.querySelector("#savename").value || S.name).trim(); if (saveToSlot("s-" + Date.now(), n)) toast("Saved as " + n + "."); }
+      if (a === "over") { const old = savesList().find(x => x.slot === slot); if (saveToSlot(slot, old ? old.label.split(" · ")[0] : S.name)) toast("Saved."); }
+      if (a === "load") { let st = null; try { st = SV.loadGame(slot); } catch (err) { st = null; } if (!st) return toast("That save could not be read.", true); if (startLoaded(st)) toast("Game loaded."); return; }
+      if (a === "del") { if (armed === slot) { try { SV.deleteSave(slot); } catch (err) { /* ignore */ } armed = null; toast("Deleted."); } else armed = slot; }
+      if (a === "export") { exportSave(); return; }
+      if (a === "import") { pickSaveFile(); return; }
+      render();
+    };
+    render();
+  });
+}
+
 // -------------------------------------------------------------- menus & loop
 const SLOT = "tt-save-1", AUTO = "tt-auto";
 function saveNow(slot) {
@@ -4318,9 +4576,9 @@ function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart()
 
 const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "" };
 function showMenu(first) {
-  ui.menuOpen = true;
+  ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
-  const anySave = hasSave(AUTO) || hasSave(SLOT);
+  const anySave = savesList().length > 0;
   if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
   const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
   m.innerHTML = "<div class='mbox'><h1>Transport &amp; Co.</h1><p class='sub'>A road transport company in the style of the old classics</p>" +
@@ -4335,6 +4593,7 @@ function showMenu(first) {
     "<label>Start year</label><div class='chips'>" + [1950, 1970, 1990].map(n => opt("year", n, n)).join("") + "</div>" +
     "<label>Map seed</label><div class='row'><input id='seed' value='" + menuState.seed + "'><button class='gb sm' data-act='dice'>Random</button></div>" +
     "<button class='gb wide big go' data-act='start'>Start game</button>" +
+    "<div class='row'>" + (anySave ? "<button class='gb' data-act='saves'>Saved games</button>" : "") + "<button class='gb' data-act='import'>Import a save file</button></div>" +
     "<button class='gb wide' data-act='tests'>Open test panel</button>" +
     "</div></div>";
   m.onclick = e => {
@@ -4346,20 +4605,21 @@ function showMenu(first) {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
       startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed });
     }
-    if (a === "continue") { if (!(hasSave(AUTO) && loadSlot(AUTO))) loadSlot(SLOT); }
+    if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
+    if (a === "saves") savesWin();
+    if (a === "import") pickSaveFile();
     if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
   };
 }
-function hideMenu() { ui.menuOpen = false; $("#menu").hidden = true; }
+function hideMenu() { ui.menuOpen = false; document.body.classList.remove("menu-open"); $("#menu").hidden = true; }
 
 function menuWin() {
   openWin("menu", "Game menu", body => {
     body.innerHTML = "<div class='col'></div>";
     const c = body.firstChild;
-    c.appendChild(btn("Save game", () => saveNow(SLOT)));
-    c.appendChild(btn("Load saved game", () => loadSlot(SLOT)));
-    c.appendChild(btn(sound.muted ? "Sound: off" : "Sound: on", function () { sound.setMuted(!sound.muted); this.textContent = sound.muted ? "Sound: off" : "Sound: on"; }));
-    c.appendChild(btn("Export save to file", () => { try { syncPersist(); SV.exportToFile(S, "transport-co-save.json", S.name); } catch (e) { toast("Export is blocked here.", true); } }));
+    c.appendChild(btn("Quick save", () => { if (saveToSlot(SLOT, S.name)) toast("Saved."); }));
+    c.appendChild(btn("Save and load…", () => { closeWin("menu"); savesWin(); }));
+    c.appendChild(btn("Settings", () => { closeWin("menu"); settingsWin(); }));
     c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
     c.appendChild(btn("Main menu", () => { closeAllWins(); showMenu(); }));
   });
@@ -4387,6 +4647,7 @@ function wireBars() {
     const pan = 40; if (e.key === "ArrowLeft") view.x += pan; if (e.key === "ArrowRight") view.x -= pan; if (e.key === "ArrowUp") view.y += pan; if (e.key === "ArrowDown") view.y -= pan;
   });
   sound.attachUnlock && sound.attachUnlock(document.body);
+  applyPrefs();
 }
 
 let lastT = performance.now(), dayAcc = 0, autoT = 0, uiT = 0;
@@ -4398,7 +4659,7 @@ function frame(now) {
       moveVehicles(dd); dayAcc += dd;
       let g = 8; while (dayAcc >= 1 && g-- > 0) { dayAcc -= 1; dailyTick(); }
       if (dayAcc > 4) dayAcc = 0;
-      autoT += dt; if (autoT > 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
+      autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
     draw();
     uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); if (S.gameOver) $("#gameover").hidden = false; }
@@ -4827,6 +5088,43 @@ const TESTS = [
     assert(bulldoze(s1.x, s1.y).ok && !R.rail.hasRoad(s1.x, s1.y), "second tap removes the track");
     const t = S.map.towns[0], rd = R.roads.nearestRoad(t.x, t.y, 6); S.company.cash += 9999; assert(placeStation(rd.x, rd.y, "busStop", "player").ok, "bus stop");
     bulldoze(rd.x, rd.y); assert(R.roads.hasRoad(rd.x, rd.y), "road stays under the bus stop");
+  }],
+  ["saves", "Named saves: save new, list, load, delete; import a save file", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "61" });
+    for (const sv of savesList()) if (sv.slot.startsWith("s-")) SV.deleteSave(sv.slot);
+    const slot = "s-test-" + Date.now(); assert(saveToSlot(slot, "Test run"), "saved"); const sv = savesList().find(x => x.slot === slot); assert(sv && sv.label.startsWith("Test run · Jan 1950"), "named with game date: " + (sv && sv.label));
+    const cash = Math.round(S.company.cash); simulateDays(45); S.company.cash += 5000;
+    assert(startLoaded(SV.loadGame(slot)), "loaded"); eq(Math.round(S.company.cash), cash, "cash back to the saved value"); eq(S.date.month, 0, "date back");
+    const text = SV.serialize(S, "x"); simulateDays(10); assert(importSaveText(text), "import from text"); eq(S.date.month, 0, "imported game date");
+    assert(!importSaveText("not a save"), "bad file refused"); assert(S && S.map, "game still running after a bad file");
+    SV.deleteSave(slot); assert(!savesList().some(x => x.slot === slot), "deleted");
+    savesWin(); assert(document.querySelector(".win[data-id=saves]"), "saves window opens"); closeAllWins();
+  }],
+  ["undo", "Drag to build shows cost first, builds on release, undo refunds", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "62" });
+    S.company.cash = 500000; const t = S.map.towns[0];
+    const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 2; y < S.map.h - 2 && !a; y++) for (let x = 2; x < S.map.w - 8 && !a; x++) { let ok = true; for (let k = 0; k < 6; k++) if (!free(x + k, y)) ok = false; if (ok) a = { x, y }; }
+    assert(a, "room for a road"); const b = { x: a.x + 5, y: a.y };
+    ui.tool = "road"; startPlan(a); updatePlan(b); const planned = ui.plan.cost; assert(planned > 0 && R.roads.hasRoad(a.x, a.y) === false, "cost shown before anything is built");
+    const cash0 = S.company.cash; commitPlan(); assert(R.roads.hasRoad(b.x, b.y), "built on release"); eq(Math.round(cash0 - S.company.cash), planned, "charged what the preview said");
+    const u = undoLast(); assert(u.ok, u.reason); assert(!R.roads.hasRoad(a.x, a.y) && !R.roads.hasRoad(b.x, b.y), "road removed"); eq(Math.round(S.company.cash), Math.round(cash0), "refunded");
+    ui.tool = "track"; startPlan(a); updatePlan(b); commitPlan(); assert(R.rail.hasRoad(b.x, b.y), "track built");
+    const st = placeStation(a.x, a.y, "trainStation", "player"); pushUndo({ kind: "station", id: st.station.id, cost: st.cost });
+    assert(undoLast().ok && !R.stationAt.has(key(a.x, a.y)), "station undone"); assert(undoLast().ok && !R.rail.hasRoad(a.x, a.y), "track undone");
+    const tile = spotNear(t.x - 8, t.y - 8, 6, t.x, t.y); const h = S.map.height[key(tile.x, tile.y)], hh = S.map.height.slice(), ww = S.map.water.slice();
+    const r = terrain.raiseTile(S.map, tile.x, tile.y, 1); assert(r.ok, r.reason); pushUndo({ kind: "terrain", changes: terrainDiff(hh, ww), cost: r.cost });
+    assert(undoLast().ok, "terrain undo"); eq(S.map.height[key(tile.x, tile.y)], h, "height restored");
+    assert(!undoLast().ok, "nothing left to undo");
+  }],
+  ["feel", "Deliveries pop up income, settings change labels and grid", () => {
+    let r; for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 2); if (r.ok) break; }
+    assert(r && r.ok, "line"); let seen = false; for (let d = 0; d < 120 && !seen; d++) { simulateDays(1); seen = R.floats.length > 0; if (seen) break; }
+    assert(seen && R.floats[0].text.startsWith("+£"), "income pop-up after a delivery");
+    const keep = { ...prefs }; settingsWin(); const w = document.querySelector(".win[data-id=settings]");
+    const g = w.querySelector("#set-grid"); g.checked = !keep.grid; g.dispatchEvent(new Event("change", { bubbles: true })); eq(prefs.grid, !keep.grid, "grid toggled");
+    const l = w.querySelector("#set-labels"); l.checked = false; l.dispatchEvent(new Event("change", { bubbles: true })); eq(prefs.labels, false, "labels off");
+    draw(); Object.assign(prefs, keep); savePrefs(); closeAllWins();
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

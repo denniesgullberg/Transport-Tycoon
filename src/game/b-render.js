@@ -117,7 +117,7 @@ function drawIndustry(px, py, ind) {
   } else if (ind.kind === "sawmill") {
     for (let k = 0; k < 3; k++) { ctx.fillStyle = "#8a5a2b"; ctx.fillRect(px - 16 + k * 11, top + 2, 9, 5); }
   }
-  if (view.z >= 1.1) label(px, top - (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory" ? 40 : 22), ind.name, 9);
+  if (prefs.labels && view.z >= 1.1) label(px, top - (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory" ? 40 : 22), ind.name, 9);
 }
 function label(px, py, text, size, col) {
   ctx.font = "bold " + size + "px Verdana, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(20,30,10,.8)";
@@ -210,6 +210,7 @@ function draw() {
         if (x + 1 < m.w) { const d = h - m.height[i + 1]; if (d > 0) poly([p.x + TW / 2, p.y, p.x, p.y + TH / 2, p.x, p.y + TH / 2 + d * HS, p.x + TW / 2, p.y + d * HS], pal.wall[h][0]); }
         if (y + 1 < m.h) { const d = h - m.height[i + m.w]; if (d > 0) poly([p.x - TW / 2, p.y, p.x, p.y + TH / 2, p.x, p.y + TH / 2 + d * HS, p.x - TW / 2, p.y + d * HS], pal.wall[h][1]); }
       }
+      if (prefs.grid) { ctx.strokeStyle = "rgba(0,0,0,.13)"; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(p.x, p.y - TH / 2); ctx.lineTo(p.x + TW / 2, p.y); ctx.lineTo(p.x, p.y + TH / 2); ctx.lineTo(p.x - TW / 2, p.y); ctx.closePath(); ctx.stroke(); }
       if (ov && ov.has(i)) diamond(p.x, p.y, "rgba(255,230,80,.28)", 0.98);
       const rd = R.roads.hasRoad(x, y), rl = !rd && R.rail.hasRoad(x, y);
       const ph = (rd || rl) && S.spans[i] ? iso(x, y, S.spans[i].h) : p;
@@ -222,6 +223,8 @@ function draw() {
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
     }
   }
+  // planned road or track while dragging
+  if (ui.plan && ui.plan.tiles) for (const q of ui.plan.tiles) { if (!inB(q.x, q.y)) continue; const p = iso(q.x, q.y, tileH(q.x, q.y)); diamond(p.x, p.y, q.st === "bad" ? "rgba(220,60,40,.5)" : q.st === "have" ? "rgba(255,255,255,.22)" : "rgba(120,230,90,.5)", 0.9); }
   // hover / selected tile
   if (ui.hover && inB(ui.hover.x, ui.hover.y)) {
     const t = ui.hover, p = iso(t.x, t.y, tileH(t.x, t.y));
@@ -231,11 +234,15 @@ function draw() {
   const vs = S.vehicles.filter(v => !(S.spans[key(v.tile.x, v.tile.y)] || {}).kind || S.spans[key(v.tile.x, v.tile.y)].kind !== "tunnel").map(v => ({ v, pos: vehiclePos(v) })).sort((a, b) => (a.pos.gx + a.pos.gy) - (b.pos.gx + b.pos.gy));
   for (const { v, pos } of vs) drawVehicle(v, pos);
   // labels
-  if (view.z >= 0.7) for (const t of m.towns) {
+  if (prefs.labels && view.z >= 0.7) for (const t of m.towns) {
     if (t.x < x0 || t.x > x1 || t.y < y0 || t.y > y1) continue;
     const p = iso(t.x, t.y, tileH(t.x, t.y));
     label(p.x, p.y - 24 - (t.size === "city" ? 20 : 0), t.name, t.size === "city" ? 13 : 11);
   }
+  // income pop-ups rise and fade over 1.6 s
+  const now = performance.now();
+  R.floats = R.floats.filter(f => now - f.t < 1600);
+  for (const f of R.floats) { const a = (now - f.t) / 1600, p = iso(f.x, f.y, tileH(f.x, f.y)); ctx.globalAlpha = 1 - a * a; label(p.x, p.y - 30 - a * 26, f.text, 11, f.color); ctx.globalAlpha = 1; }
 }
 function vehiclePos(v) {
   let gx = v.tile.x, gy = v.tile.y;

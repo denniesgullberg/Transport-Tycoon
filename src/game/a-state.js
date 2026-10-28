@@ -62,7 +62,7 @@ function newGame(cfg) {
 }
 
 function initRuntime() {
-  R = { roads: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), rail: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), sprites: {}, towns: null, bld: new Map(), indAt: new Map(), stationAt: new Map(), depotAt: new Map(), pending: [] };
+  R = { roads: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), rail: new roadnet.RoadNetwork((x, y) => S.map.height[y * S.map.w + x], 2), sprites: {}, towns: null, bld: new Map(), indAt: new Map(), stationAt: new Map(), depotAt: new Map(), pending: [], floats: [], undo: [], lastHorn: 0 };
   const m = S.map;
   if (S.roadTiles.length) for (const p of S.roadTiles) R.roads.addRoad(p.x, p.y);
   else for (const t of m.towns) for (const r of t.roads) R.roads.addRoad(r.x, r.y);
@@ -239,7 +239,7 @@ function dock(vh, dest) {
     S.company.cash += inc; post(cat, inc); S.qIncome += inc;
     if (vh.cargo === "passengers") S.metrics.passengers += vh.loaded; else S.metrics.cargo += vh.loaded;
     S.metrics.quarterCargo += vh.loaded;
-    if (vh.owner === "player") { vh.profit.thisYear += inc; vh.profit.lifetime += inc; if (inc > 40) sound.play("cash"); }
+    if (vh.owner === "player") { vh.profit.thisYear += inc; vh.profit.lifetime += inc; floatText(st.x, st.y, "+" + money(inc)); if (inc > 40) sound.play("cash"); }
     else { const rv = S.rivals.find(r => r.ai.id === vh.owner); if (rv) { const route = rv.ai.routes.find(x => x.fromStation === from.id && x.toStation === st.id); if (route) AI.recordIncome(rv.ai, route.id, inc); else rv.ai.cash += inc; } }
     // deliver raw cargo to industries that use it
     for (const i of covered(st).inds) if ((CARGO_TO_IND[vh.cargo] || []).includes(i.kind)) { i.input[vh.cargo] = (i.input[vh.cargo] || 0) + vh.loaded; i.received = i.received || {}; i.received[vh.cargo] = (i.received[vh.cargo] || 0) + vh.loaded; break; }
@@ -272,7 +272,7 @@ function dailyVehicle(vh) {
         }
       }
     }
-    if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; tryStep(vh); }
+    if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; if (vh.owner === "player") departSound(vh); tryStep(vh); }
   }
 }
 function depotsExist() { return S.depots.length > 0; }
@@ -497,13 +497,15 @@ function buildCrossing(x, y) {
   if (S.company.cash < sp.cost) return { ok: false, reason: "A " + sp.kind + " here costs " + money(sp.cost) + ". Not enough money." };
   const dx = Math.sign(sp.endX - x), dy = Math.sign(sp.endY - y), h0 = S.map.height[key(x, y)];
   spend("construction", sp.cost);
+  const added = [];
   for (let k = 1; k <= sp.length + 1; k++) {
     const tx = x + dx * k, ty = y + dy * k, i = key(tx, ty);
     if (k <= sp.length) S.spans[i] = { kind: sp.kind, h: h0 };
+    if (!net.hasRoad(tx, ty)) added.push({ x: tx, y: ty });
     S.map.occupied[i] = 1; net.addRoad(tx, ty);
   }
   sound.play("build");
-  return { ok: true, span: sp };
+  return { ok: true, span: sp, added, net: net === R.roads ? "road" : "rail" };
 }
 
 // ---------------------------------------------------------------------- rivals

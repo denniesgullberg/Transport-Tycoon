@@ -322,6 +322,43 @@ const TESTS = [
     const t = S.map.towns[0], rd = R.roads.nearestRoad(t.x, t.y, 6); S.company.cash += 9999; assert(placeStation(rd.x, rd.y, "busStop", "player").ok, "bus stop");
     bulldoze(rd.x, rd.y); assert(R.roads.hasRoad(rd.x, rd.y), "road stays under the bus stop");
   }],
+  ["saves", "Named saves: save new, list, load, delete; import a save file", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "61" });
+    for (const sv of savesList()) if (sv.slot.startsWith("s-")) SV.deleteSave(sv.slot);
+    const slot = "s-test-" + Date.now(); assert(saveToSlot(slot, "Test run"), "saved"); const sv = savesList().find(x => x.slot === slot); assert(sv && sv.label.startsWith("Test run · Jan 1950"), "named with game date: " + (sv && sv.label));
+    const cash = Math.round(S.company.cash); simulateDays(45); S.company.cash += 5000;
+    assert(startLoaded(SV.loadGame(slot)), "loaded"); eq(Math.round(S.company.cash), cash, "cash back to the saved value"); eq(S.date.month, 0, "date back");
+    const text = SV.serialize(S, "x"); simulateDays(10); assert(importSaveText(text), "import from text"); eq(S.date.month, 0, "imported game date");
+    assert(!importSaveText("not a save"), "bad file refused"); assert(S && S.map, "game still running after a bad file");
+    SV.deleteSave(slot); assert(!savesList().some(x => x.slot === slot), "deleted");
+    savesWin(); assert(document.querySelector(".win[data-id=saves]"), "saves window opens"); closeAllWins();
+  }],
+  ["undo", "Drag to build shows cost first, builds on release, undo refunds", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "62" });
+    S.company.cash = 500000; const t = S.map.towns[0];
+    const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 2; y < S.map.h - 2 && !a; y++) for (let x = 2; x < S.map.w - 8 && !a; x++) { let ok = true; for (let k = 0; k < 6; k++) if (!free(x + k, y)) ok = false; if (ok) a = { x, y }; }
+    assert(a, "room for a road"); const b = { x: a.x + 5, y: a.y };
+    ui.tool = "road"; startPlan(a); updatePlan(b); const planned = ui.plan.cost; assert(planned > 0 && R.roads.hasRoad(a.x, a.y) === false, "cost shown before anything is built");
+    const cash0 = S.company.cash; commitPlan(); assert(R.roads.hasRoad(b.x, b.y), "built on release"); eq(Math.round(cash0 - S.company.cash), planned, "charged what the preview said");
+    const u = undoLast(); assert(u.ok, u.reason); assert(!R.roads.hasRoad(a.x, a.y) && !R.roads.hasRoad(b.x, b.y), "road removed"); eq(Math.round(S.company.cash), Math.round(cash0), "refunded");
+    ui.tool = "track"; startPlan(a); updatePlan(b); commitPlan(); assert(R.rail.hasRoad(b.x, b.y), "track built");
+    const st = placeStation(a.x, a.y, "trainStation", "player"); pushUndo({ kind: "station", id: st.station.id, cost: st.cost });
+    assert(undoLast().ok && !R.stationAt.has(key(a.x, a.y)), "station undone"); assert(undoLast().ok && !R.rail.hasRoad(a.x, a.y), "track undone");
+    const tile = spotNear(t.x - 8, t.y - 8, 6, t.x, t.y); const h = S.map.height[key(tile.x, tile.y)], hh = S.map.height.slice(), ww = S.map.water.slice();
+    const r = terrain.raiseTile(S.map, tile.x, tile.y, 1); assert(r.ok, r.reason); pushUndo({ kind: "terrain", changes: terrainDiff(hh, ww), cost: r.cost });
+    assert(undoLast().ok, "terrain undo"); eq(S.map.height[key(tile.x, tile.y)], h, "height restored");
+    assert(!undoLast().ok, "nothing left to undo");
+  }],
+  ["feel", "Deliveries pop up income, settings change labels and grid", () => {
+    let r; for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 2); if (r.ok) break; }
+    assert(r && r.ok, "line"); let seen = false; for (let d = 0; d < 120 && !seen; d++) { simulateDays(1); seen = R.floats.length > 0; if (seen) break; }
+    assert(seen && R.floats[0].text.startsWith("+£"), "income pop-up after a delivery");
+    const keep = { ...prefs }; settingsWin(); const w = document.querySelector(".win[data-id=settings]");
+    const g = w.querySelector("#set-grid"); g.checked = !keep.grid; g.dispatchEvent(new Event("change", { bubbles: true })); eq(prefs.grid, !keep.grid, "grid toggled");
+    const l = w.querySelector("#set-labels"); l.checked = false; l.dispatchEvent(new Event("change", { bubbles: true })); eq(prefs.labels, false, "labels off");
+    draw(); Object.assign(prefs, keep); savePrefs(); closeAllWins();
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;

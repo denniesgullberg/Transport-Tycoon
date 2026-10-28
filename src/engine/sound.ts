@@ -17,6 +17,12 @@ class SoundEngine {
   private master: GainNode | null = null;
   private _muted = false;
   private _volume = 0.4;
+  private musicGain: GainNode | null = null;
+  private musicTimer: ReturnType<typeof setInterval> | null = null;
+  private _music = false;
+  private _musicVolume = 0.25;
+  private nextBeat = 0;
+  private beat = 0;
 
   constructor() {
     try { this._muted = localStorage.getItem(STORAGE_KEY) === "1"; } catch { /* storage unavailable */ }
@@ -26,6 +32,7 @@ class SoundEngine {
   attachUnlock(): void {
     const unlock = () => {
       this.ensure();
+      if (this._music) this.startMusic();
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
     };
@@ -54,6 +61,61 @@ class SoundEngine {
     this._muted = m;
     try { localStorage.setItem(STORAGE_KEY, m ? "1" : "0"); } catch { /* ignore */ }
     if (this.master) this.master.gain.value = m ? 0 : this._volume;
+  }
+
+  // ----------------------------------------------------------------- music
+  // A gentle looping tune built from a chord progression, scheduled a little ahead.
+
+  get music() { return this._music; }
+
+  setMusic(on: boolean): void {
+    this._music = on;
+    if (on) this.startMusic(); else this.stopMusic();
+  }
+
+  setMusicVolume(v: number): void {
+    this._musicVolume = Math.max(0, Math.min(1, v));
+    if (this.musicGain) this.musicGain.gain.value = this._musicVolume;
+  }
+
+  private startMusic(): void {
+    if (this.musicTimer || !this.ctx) return;   // starts for real after the first tap unlocks audio
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = this._musicVolume;
+    this.musicGain.connect(this.ctx.destination);
+    this.nextBeat = this.ctx.currentTime + 0.1; this.beat = 0;
+    this.musicTimer = setInterval(() => this.scheduleMusic(), 200);
+  }
+
+  private stopMusic(): void {
+    if (this.musicTimer) clearInterval(this.musicTimer);
+    this.musicTimer = null;
+    if (this.musicGain) { this.musicGain.disconnect(); this.musicGain = null; }
+  }
+
+  private scheduleMusic(): void {
+    if (!this.ctx || !this.musicGain) return;
+    const spb = 60 / 96 / 2;                        // eighth notes at 96 bpm
+    // I - vi - IV - V in C, two bars each; melody notes are scale steps over the chord root
+    const roots = [48, 45, 41, 43];
+    const tune = [0, 4, 7, 4, 9, 7, 4, 2, 0, 3, 7, 3, 5, 3, 0, -1, 0, 4, 9, 7, 5, 4, 2, 4, 2, 5, 7, 11, 9, 7, 5, 2];
+    while (this.nextBeat < this.ctx.currentTime + 0.6) {
+      const bar = Math.floor(this.beat / 16) % 4, step = this.beat % 32;
+      const root = roots[bar], t = this.nextBeat - this.ctx.currentTime;
+      if (this.beat % 4 === 0) this.note(root - 12, spb * 3.6, "triangle", 0.5, t);
+      if (this.beat % 2 === 0) this.note(root + 12 + tune[step], spb * 1.7, "square", 0.08, t);
+      if (this.beat % 8 === 4) this.note(root + 7, spb * 3, "sine", 0.18, t);
+      this.nextBeat += spb; this.beat++;
+    }
+  }
+
+  private note(midi: number, dur: number, type: OscillatorType, vol: number, delay: number): void {
+    if (!this.ctx || !this.musicGain) return;
+    const t0 = this.ctx.currentTime + Math.max(0, delay), f = 440 * Math.pow(2, (midi - 69) / 12);
+    const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
+    osc.type = type; osc.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g).connect(this.musicGain); osc.start(t0); osc.stop(t0 + dur + 0.05);
   }
 
   setVolume(v: number): void {
