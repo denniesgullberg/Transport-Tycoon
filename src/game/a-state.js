@@ -457,8 +457,15 @@ function placeDepot(x, y, dk) {
 function bulldoze(x, y) {
   const m = S.map, i = key(x, y);
   const st = R.stationAt.get(i), dp = R.depotAt.get(i);
-  if (st) { S.stations = S.stations.filter(s => s !== st); R.stationAt.delete(i); for (const v of S.vehicles) OR.dropStation(v.orders, st.id); }
-  if (dp) { S.depots = S.depots.filter(d => d !== dp); R.depotAt.delete(i); }
+  // A stop or depot comes off first; the road or track under it stays until the next tap.
+  if (st || dp) {
+    const c = cost(BULLDOZE);
+    if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
+    spend("construction", c);
+    if (st) { S.stations = S.stations.filter(s => s !== st); R.stationAt.delete(i); for (const v of S.vehicles) OR.dropStation(v.orders, st.id); }
+    if (dp) { S.depots = S.depots.filter(d => d !== dp); R.depotAt.delete(i); }
+    return { ok: true, removed: st ? "station" : "depot" };
+  }
   if (R.roads.hasRoad(x, y)) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
@@ -479,7 +486,6 @@ function bulldoze(x, y) {
     for (const v of S.vehicles.slice()) if (isTrain(v) && ((v.tile.x === x && v.tile.y === y) || (v.state === "moving" && v.to.x === x && v.to.y === y))) removeVehicle(v);
     return { ok: true };
   }
-  if (st || dp) return { ok: true };
   return { ok: false, reason: "Nothing to remove here." };
 }
 function buildCrossing(x, y) {

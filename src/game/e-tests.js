@@ -312,6 +312,16 @@ const TESTS = [
     sw.querySelector("[data-a=buy]").click(); assert(S.vehicles.filter(v => isTrain(v)).length === 2, "second train bought from the depot window");
     closeAllWins(); industryWin(S.map.industries.find(i => i.kind === "factory") || S.map.industries[0]); assert(document.querySelector(".win[data-id=ind]").textContent.includes("vehicles"), "industry lists matching vehicles"); closeAllWins();
   }],
+  ["fix", "Bulldozing a stop or depot leaves the road or track under it", () => {
+    let r; for (const seed of ["11", "12", "13", "14", "15"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = buildDemoLine("rail", "coal"); if (r.ok) break; }
+    assert(r && r.ok, "line");
+    const s1 = r.s1, d = r.depot;
+    const a = bulldoze(s1.x, s1.y); assert(a.ok && a.removed === "station", "station removed"); assert(R.rail.hasRoad(s1.x, s1.y), "track stays under the station");
+    const b = bulldoze(d.x, d.y); assert(b.ok && b.removed === "depot", "depot removed"); assert(R.rail.hasRoad(d.x, d.y), "track stays under the depot");
+    assert(bulldoze(s1.x, s1.y).ok && !R.rail.hasRoad(s1.x, s1.y), "second tap removes the track");
+    const t = S.map.towns[0], rd = R.roads.nearestRoad(t.x, t.y, 6); S.company.cash += 9999; assert(placeStation(rd.x, rd.y, "busStop", "player").ok, "bus stop");
+    bulldoze(rd.x, rd.y); assert(R.roads.hasRoad(rd.x, rd.y), "road stays under the bus stop");
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;
