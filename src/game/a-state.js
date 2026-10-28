@@ -53,7 +53,7 @@ function newGame(cfg) {
     news: EV.newNewsLog(), evState: EV.newEventState(), objectives: EV.defaultObjectives(cfg.startYear),
     ledgers: [], acc: {}, history: [], metrics: { passengers: 0, cargo: 0, quarterCargo: 0 },
     qIncome: 0, quarterlyIncome: [], monthNet: [], bank: "ok", gameOver: false,
-    rivals: [], roadTiles: [], railTiles: [], name: "Oakwood Transport",
+    rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, name: "Oakwood Transport",
   };
   for (let i = 0; i < settings.rivals; i++) S.rivals.push({ ai: AI.createAi(i, settings.startingCash, 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] });
   initRuntime();
@@ -67,15 +67,17 @@ function initRuntime() {
   if (S.roadTiles.length) for (const p of S.roadTiles) R.roads.addRoad(p.x, p.y);
   else for (const t of m.towns) for (const r of t.roads) R.roads.addRoad(r.x, r.y);
   for (const p of (S.railTiles || [])) R.rail.addRoad(p.x, p.y);
+  if (!S.signals) S.signals = {}; if (!S.elec) S.elec = {};
   rebuildLookups();
-  for (const vh of S.vehicles) netOf(vh).moveVehicle(vh.id, null, vh.state === "moving" ? vh.to : vh.tile);
+  for (const vh of S.vehicles) if (!isTrain(vh)) netOf(vh).moveVehicle(vh.id, null, vh.state === "moving" ? vh.to : vh.tile);
+  rebuildRailRes();
 }
 function rebuildLookups() {
   const m = S.map;
   R.bld.clear(); R.indAt.clear(); R.stationAt.clear(); R.depotAt.clear();
   for (const t of m.towns) for (const b of t.buildings) R.bld.set(b.y * m.w + b.x, b);
   for (const i of m.industries) R.indAt.set((i.y + 1) * m.w + (i.x + 1), i);
-  for (const s of S.stations) R.stationAt.set(s.y * m.w + s.x, s);
+  for (const s of S.stations) for (const t of stationTiles(s)) R.stationAt.set(t.y * m.w + t.x, s);
   for (const d of S.depots) R.depotAt.set(d.y * m.w + d.x, d);
 }
 function townOf(x, y) {
@@ -115,8 +117,8 @@ function spend(cat, amount) { S.company.cash -= amount; post(cat, -amount); }
 function covered(st) {
   // what the station covers: houses (towns) and industries
   const r = ST.CATCHMENT[st.kind], out = { houses: 0, towns: new Set(), inds: [] };
-  for (const t of S.map.towns) for (const b of t.buildings) if (Math.abs(b.x - st.x) <= r && Math.abs(b.y - st.y) <= r) { out.houses++; out.towns.add(t.id); }
-  for (const i of S.map.industries) if (Math.abs(i.x - st.x) <= r && Math.abs(i.y - st.y) <= r) out.inds.push(i);
+  for (const t of S.map.towns) for (const b of t.buildings) if (ST.covers(st, b.x, b.y)) { out.houses++; out.towns.add(t.id); }
+  for (const i of S.map.industries) if (ST.covers(st, i.x, i.y)) out.inds.push(i);
   return out;
 }
 function producesAt(st, cargo) {
@@ -151,12 +153,13 @@ function makeVehicle(owner, modelId, depotOrTile, stationIds) {
   };
   vh.orders.autoService = owner === "player";
   S.vehicles.push(vh);
-  netFor(depotKindOf(model)).moveVehicle(id, null, tile);
+  if (isTrainModel(model)) { vh.trail = [{ x: tile.x, y: tile.y }]; vh.res = []; }
+  else netFor(depotKindOf(model)).moveVehicle(id, null, tile);
   for (const sid of stationIds || []) { const s = stationById(sid); if (s) { s.served[model.cargo] = true; if (s.daysSincePickup[model.cargo] == null) s.daysSincePickup[model.cargo] = 0; } }
   return vh;
 }
 function removeVehicle(vh) {
-  R.roads.removeVehicle(vh.id); R.rail.removeVehicle(vh.id);
+  R.roads.removeVehicle(vh.id); R.rail.removeVehicle(vh.id); if (R.res) releaseAll(vh.id);
   S.vehicles = S.vehicles.filter(v => v !== vh);
 }
 function bestPair(cargo, nearTile, stKind, net) {
@@ -178,6 +181,7 @@ function buyVehicle(modelId, depot) {
   if (!m || !m.supported || (m.type !== "bus" && m.type !== "truck" && m.type !== "train")) return { ok: false, msg: "This vehicle type is not playable yet." };
   const dk = depotKindOf(m);
   if ((depot.kind || "road") !== dk) return { ok: false, msg: dk === "rail" ? "Trains are built at a train depot on a track." : "Buses and trucks are built at a road depot." };
+  if (isTrainModel(m) && /^(Volt|Arc|Meridian|Tempest)/.test((V.getModel(m.parts.locoId) || {}).name || "") && !isElec(depot.x, depot.y)) return { ok: false, msg: "Electric locomotives need electrified track. Electrify the depot and the line first." };
   if (S.company.cash < m.price) return { ok: false, msg: "Not enough money." };
   const pair = bestPair(m.cargo, depot, stationKindFor(m), netFor(dk));
   spend("newVehicles", m.price);
@@ -209,6 +213,7 @@ function nearestDepot(t, dk) {
 }
 
 function tryStep(vh) {
+  if (isTrain(vh)) return trainStep(vh);
   const dest = destTile(vh);
   if (!dest) { vh.state = "idle"; return; }
   if (vh.tile.x === dest.x && vh.tile.y === dest.y) {
@@ -218,6 +223,7 @@ function tryStep(vh) {
   const next = net.nextTile(vh.id, vh.tile, dest);
   if (!next) { vh.state = "idle"; vh.wait++; if (vh.wait > 240) { vh.wait = 0; OR.skipOrder(vh.orders); } return; }
   if (!net.canEnter(vh.id, next)) { vh.state = "idle"; return; }
+  if (R.res.has(next.y * S.map.w + next.x)) { vh.state = "idle"; return; }   // barriers down: a train is coming
   net.moveVehicle(vh.id, vh.tile, next);
   vh.from = { x: vh.tile.x, y: vh.tile.y }; vh.to = next; vh.p = 0; vh.state = "moving"; vh.wait = 0;
   vh.dir = { dx: next.x - vh.tile.x, dy: next.y - vh.tile.y };
@@ -229,6 +235,7 @@ function dock(vh, dest) {
   if (dest.kind === "depot") { core.serviceVehicle(vh.core, m); vh.core.daysSinceService = 0; return; }
   const st = stationById(dest.id);
   if (!st) return;
+  vh.trips = (vh.trips || 0) + 1;
   if (vh.loaded > 0 && vh.origin !== st.id && OR.shouldUnload(vh.orders) && acceptsAt(st, vh.cargo)) {
     const from = stationById(vh.origin) || st;
     const days = Math.max(0, S.totalDays - vh.loadDay);
@@ -267,12 +274,17 @@ function dailyVehicle(vh) {
       if (st && OR.shouldLoad(vh.orders)) {
         ST.recordPickup(st, vh.cargo, m.speedKmh, vh.core.ageDays / 365);
         if (vh.loaded === 0 || vh.origin === st.id) {
-          const got = ST.loadOnto(st, vh.cargo, m.capacity - vh.loaded);
+          // trains load a set amount per day for each platform tile they stand on
+          const cap = isTrainModel(m) ? Math.max(1, platformTilesUnder(vh, st)) * 30 : Infinity;
+          const want = Math.min(m.capacity - vh.loaded, cap);
+          const got = ST.loadOnto(st, vh.cargo, want);
           if (got > 0) { if (vh.loaded === 0) { vh.origin = st.id; vh.loadDay = S.totalDays; } vh.loaded += got; }
+          if (isTrainModel(m) && got > 0 && got >= cap && vh.loaded < m.capacity) vh.stillLoading = true; else vh.stillLoading = false;
         }
       }
     }
-    if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; if (vh.owner === "player") departSound(vh); tryStep(vh); }
+    if (vh.stillLoading) vh.stillLoading = false;
+    else if (OR.tickDock(vh.orders, vh.loaded, m.capacity, 1) === "depart") { vh.state = "idle"; if (vh.owner === "player") departSound(vh); tryStep(vh); }
   }
 }
 function depotsExist() { return S.depots.length > 0; }
@@ -287,6 +299,7 @@ function moveVehicles(dtDays) {
       let guard = 4;
       while (vh.p >= 1 && vh.state === "moving" && guard-- > 0) {
         vh.p -= 1; vh.tile = { x: vh.to.x, y: vh.to.y }; vh.state = "idle";
+        if (isTrain(vh)) trainArrive(vh);
         const keep = vh.p; tryStep(vh); if (vh.state === "moving") vh.p = keep; else vh.p = 0;
       }
     } else if (vh.state === "idle") {
@@ -402,6 +415,7 @@ function canBuildRoadOn(x, y) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build on water. Use the Bridge tool from a road end.";
   if (R.roads.hasRoad(x, y)) return "exists";
+  if (R.rail.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A station or depot is in the way." : S.spans[i] ? "A road cannot cross a rail bridge or tunnel." : "";
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
@@ -410,7 +424,7 @@ function buildRoadTile(x, y, ownerPays = true) {
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
-  let c = cost(ROAD_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0);
+  let c = cost(ROAD_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.rail.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
   if (ownerPays) { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
@@ -419,7 +433,7 @@ function canBuildTrackOn(x, y) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build track on water. Use the Bridge tool from a track end.";
   if (R.rail.hasRoad(x, y)) return "exists";
-  if (R.roads.hasRoad(x, y)) return "A road is in the way. There are no level crossings yet.";
+  if (R.roads.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A stop or depot is in the way." : S.spans[i] ? "Track cannot cross a road bridge or tunnel." : "";
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
@@ -428,7 +442,7 @@ function buildTrackTile(x, y, ownerPays = true) {
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
-  const c = cost(TRACK_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0);
+  const c = cost(TRACK_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.roads.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
   if (ownerPays) { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.rail.addRoad(x, y);
   return { ok: true, cost: c };
@@ -439,9 +453,15 @@ function placeStation(x, y, kind, owner) {
   if (R.stationAt.has(key(x, y)) || R.depotAt.has(key(x, y))) return { ok: false, reason: "There is already a building here." };
   const c = cost(rail ? RAIL_STATION_COST : STATION_COST);
   if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const join = owner === "player" ? stationNeighbour(x, y, kind, owner) : null;
+  if (join) {
+    if (!join.tiles) join.tiles = [{ x: join.x, y: join.y }];
+    join.tiles.push({ x, y }); R.stationAt.set(key(x, y), join);
+    return { ok: true, station: join, cost: c, joined: true, tile: { x, y } };
+  }
   const s = ST.newStation("s" + (++S.ids.s), nameStation(kind, x, y), kind, x, y);
-  s.owner = owner; S.stations.push(s); R.stationAt.set(key(x, y), s);
-  return { ok: true, station: s, cost: c };
+  s.owner = owner; s.tiles = [{ x, y }]; S.stations.push(s); R.stationAt.set(key(x, y), s);
+  return { ok: true, station: s, cost: c, tile: { x, y } };
 }
 function placeDepot(x, y, dk) {
   dk = dk || "road";
@@ -454,6 +474,12 @@ function placeDepot(x, y, dk) {
   S.depots.push(d); R.depotAt.set(key(x, y), d);
   return { ok: true, depot: d, cost: c };
 }
+function removeStationTile(st, x, y) {
+  R.stationAt.delete(key(x, y));
+  st.tiles = stationTiles(st).filter(t => !(t.x === x && t.y === y));
+  if (!st.tiles.length) { S.stations = S.stations.filter(s => s !== st); for (const v of S.vehicles) OR.dropStation(v.orders, st.id); return; }
+  if (st.x === x && st.y === y) { st.x = st.tiles[0].x; st.y = st.tiles[0].y; }
+}
 function bulldoze(x, y) {
   const m = S.map, i = key(x, y);
   const st = R.stationAt.get(i), dp = R.depotAt.get(i);
@@ -462,11 +488,11 @@ function bulldoze(x, y) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
     spend("construction", c);
-    if (st) { S.stations = S.stations.filter(s => s !== st); R.stationAt.delete(i); for (const v of S.vehicles) OR.dropStation(v.orders, st.id); }
+    if (st) removeStationTile(st, x, y);
     if (dp) { S.depots = S.depots.filter(d => d !== dp); R.depotAt.delete(i); }
     return { ok: true, removed: st ? "station" : "depot" };
   }
-  if (R.roads.hasRoad(x, y)) {
+  if (R.roads.hasRoad(x, y) && !R.rail.hasRoad(x, y)) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
     spend("construction", c);
@@ -480,10 +506,10 @@ function bulldoze(x, y) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
     spend("construction", c);
-    R.rail.removeRoad(x, y);
-    const sp = S.spans[i]; if (sp) delete S.spans[i];
-    m.occupied[i] = 0;
-    for (const v of S.vehicles.slice()) if (isTrain(v) && ((v.tile.x === x && v.tile.y === y) || (v.state === "moving" && v.to.x === x && v.to.y === y))) removeVehicle(v);
+    R.rail.removeRoad(x, y); delete S.signals[i]; delete S.elec[i];
+    const road = R.roads.hasRoad(x, y);
+    if (!road) { const sp = S.spans[i]; if (sp) delete S.spans[i]; m.occupied[i] = 0; }
+    for (const v of S.vehicles.slice()) if (isTrain(v) && trainTiles(v).some(t => t.x === x && t.y === y)) removeVehicle(v);
     return { ok: true };
   }
   return { ok: false, reason: "Nothing to remove here." };

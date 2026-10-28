@@ -30,6 +30,8 @@ export interface Station {
   lastAgeYears: number;
   /** Cargo kinds this station has had a pickup for. Only those cargoes get supplied. */
   served: Record<string, boolean>;
+  /** All tiles of a station built longer or wider than one tile. Catchment spreads from every tile. */
+  tiles?: Pt[];
 }
 
 export function newStation(id: string, name: string, kind: StationKind, x: number, y: number): Station {
@@ -38,17 +40,20 @@ export function newStation(id: string, name: string, kind: StationKind, x: numbe
 
 // ------------------------------------------------------------- catchment
 
+const tilesOf = (s: Station): Pt[] => (s.tiles && s.tiles.length ? s.tiles : [{ x: s.x, y: s.y }]);
+
 export function covers(s: Station, x: number, y: number): boolean {
   const r = CATCHMENT[s.kind];
-  return Math.abs(x - s.x) <= r && Math.abs(y - s.y) <= r;
+  return tilesOf(s).some(t => Math.abs(x - t.x) <= r && Math.abs(y - t.y) <= r);
 }
 
 /** Tiles to highlight when the player hovers or builds a station. */
 export function catchmentTiles(s: Station, mapW: number, mapH: number): Pt[] {
-  const r = CATCHMENT[s.kind];
+  const r = CATCHMENT[s.kind], ts = tilesOf(s);
+  const x0 = Math.min(...ts.map(t => t.x)), x1 = Math.max(...ts.map(t => t.x)), y0 = Math.min(...ts.map(t => t.y)), y1 = Math.max(...ts.map(t => t.y));
   const out: Pt[] = [];
-  for (let y = Math.max(0, s.y - r); y <= Math.min(mapH - 1, s.y + r); y++) {
-    for (let x = Math.max(0, s.x - r); x <= Math.min(mapW - 1, s.x + r); x++) out.push({ x, y });
+  for (let y = Math.max(0, y0 - r); y <= Math.min(mapH - 1, y1 + r); y++) {
+    for (let x = Math.max(0, x0 - r); x <= Math.min(mapW - 1, x1 + r); x++) if (covers(s, x, y)) out.push({ x, y });
   }
   return out;
 }

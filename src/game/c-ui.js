@@ -43,6 +43,8 @@ const TOOLS = [
   ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
   ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile. Trains are built and serviced here."],
+  ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Tap again to turn it round, again for two-way, again to remove. A train only enters the next block when it is empty."],
+  ["electrify", "Electrify", () => "Electrify: " + money(cost(ELEC_COST)) + " per tile. Drag over track. Electric locomotives only run on electrified track."],
   ["bridge", "Bridge", "Tap the last road or track tile before water or a hill. A bridge or tunnel is built to the far side at the same height."],
   ["raise", "Raise land", () => "Raise land: about " + money(cost(250)) + " per tile. Neighbours follow to keep slopes gentle."],
   ["lower", "Lower land", () => "Lower land: about " + money(cost(250)) + " per tile."],
@@ -87,7 +89,7 @@ cv.addEventListener("pointerdown", e => {
   cv.setPointerCapture(e.pointerId); const p = pos(e); ptrs.set(e.pointerId, p);
   if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; ui.plan = null; setTool(ui.tool); return; }
   tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now() };
-  if (ui.tool === "road" || ui.tool === "track") { painting = true; startPlan(screenToTile(p.x, p.y)); }
+  if (ui.tool === "road" || ui.tool === "track" || ui.tool === "electrify") { painting = true; startPlan(screenToTile(p.x, p.y)); }
 });
 cv.addEventListener("pointermove", e => {
   const p = pos(e);
@@ -122,11 +124,12 @@ function onTap(p) {
   if (tool === "inspect") return inspectAt(p, t);
   if (tool === "road") { const r = buildRoadTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
   if (tool === "track") { const r = buildTrackTile(t.x, t.y); if (!r.ok) toast(r.reason, true); return; }
-  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "station", id: r.station.id, cost: r.cost }); sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return; }
+  if (tool === "trainStation") { const r = placeStation(t.x, t.y, "trainStation", "player"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "station", id: r.station.id, tile: r.tile, cost: r.cost }); sound.play("build"); toast(r.joined ? "Platform added to " + r.station.name + " (" + stationTiles(r.station).length + " tiles)." : r.station.name + " built."); updateOverlay(); return; }
+  if (tool === "signal") { const k = key(t.x, t.y), prev = S.signals[k] ? { ...S.signals[k] } : null; const r = cycleSignal(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "signal", k, prev, cost: r.cost }); sound.play("click"); toast(signalText(r.signal)); return; }
   if (tool === "railDepot") { const r = placeDepot(t.x, t.y, "rail"); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
   if (tool === "busStop" || tool === "truckStop") {
     const r = placeStation(t.x, t.y, tool, "player"); if (!r.ok) return toast(r.reason, true);
-    pushUndo({ kind: "station", id: r.station.id, cost: r.cost });
+    pushUndo({ kind: "station", id: r.station.id, tile: r.tile, cost: r.cost });
     sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return;
   }
   if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
@@ -264,6 +267,8 @@ function shopWin(depot, startTab) {
         if (tab === "train") {
           const w = V.getModel(wagonPick);
           curWagon = w; const cs = V.consistStats(sel.id, w.id, wagons); wagons = cs.n; price = cs.price; speed = cs.speedKmh; runCost = cs.runningCostPerYear; capTxt = cs.capacity + " " + V.cargoUnitLabel(w.cargo); warn = cs.warnings.join(" ");
+          if (/^(Volt|Arc|Meridian|Tempest)/.test(sel.name)) warn = (warn ? warn + " " : "") + "Electric: needs electrified track (Electrify tool), including the depot.";
+          h += "<div class='kv'><span>Train length</span><b>" + trainLen({ parts: { n: cs.n } }) + " tiles</b></div>";
           preview = V.trainSvg(sel.id, w.id, cs.n, 48);
           h += "<div class='prev'>" + preview + "</div><div class='dim'>" + (CARGO_USE[w.cargo] || "") + "</div><div class='row'>Wagons <button class='gb sm' data-a='wm'>−</button><b>" + cs.n + "</b><button class='gb sm' data-a='wp'>+</button></div>";
         } else h += "<div class='prev'>" + V.vehicleSvg(sel, 48) + "</div>";

@@ -177,14 +177,79 @@ const TESTS = [
     const bus = V.availableModels(S.date.year, "bus")[0]; const bad = buyVehicle(bus.id, done.line.depot); assert(!bad.ok, "bus refused at a train depot");
     const out = simulateDays(300); assert(out.pax > 0, "passengers carried by train: " + JSON.stringify(out));
   }],
-  ["game", "Rail and road stay separate, bulldozing track removes the train", () => {
+  ["rail", "Level crossings: track over a road, trains and cars never share it", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "31" });
     S.company.cash = 500000; const t = S.map.towns[0]; const rd = R.roads.nearestRoad(t.x, t.y, 6);
-    const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(free, "free tile");
-    assert(buildTrackTile(free.x, free.y).ok, "track built"); assert(R.rail.hasRoad(free.x, free.y) && !R.roads.hasRoad(free.x, free.y), "only on the rail network");
-    const r = buildTrackTile(rd.x, rd.y); assert(!r.ok, "cannot lay track over a road");
-    const rr = buildRoadTile(free.x, free.y); assert(rr.ok === true ? false : true, "cannot lay road over track");
-    assert(bulldoze(free.x, free.y).ok, "bulldoze track"); assert(!R.rail.hasRoad(free.x, free.y), "track gone");
+    const r = buildTrackTile(rd.x, rd.y); assert(r.ok, "track over a road makes a crossing: " + r.reason); assert(crossingAt(rd.x, rd.y), "crossing");
+    R.res.set(key(rd.x, rd.y), "train-x"); assert(!railFree(rd, "other"), "reserved crossing is taken");
+    const bus = makeVehicle("player", V.availableModels(1950, "bus")[0].id, { x: rd.x + 1, y: rd.y }, []); R.res.delete(key(rd.x, rd.y));
+    R.roads.moveVehicle(bus.id, null, rd); assert(!railFree(rd, "train-x"), "a car on the crossing keeps the train out"); removeVehicle(bus);
+    assert(bulldoze(rd.x, rd.y).ok && R.roads.hasRoad(rd.x, rd.y) && !R.rail.hasRoad(rd.x, rd.y), "bulldoze takes the rails and leaves the road");
+    const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(buildTrackTile(free.x, free.y).ok, "track"); assert(buildRoadTile(free.x, free.y).ok && crossingAt(free.x, free.y), "road over track makes a crossing too");
+  }],
+  ["rail", "Passing loop with one-way signals: two trains pass; without signals a stuck train is reported", () => {
+    let area = null;
+    for (const seed of ["71", "72", "73", "74", "75"]) {
+      startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed });
+      const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+      for (let y = 3; y < S.map.h - 6 && !area; y++) for (let x = 3; x < S.map.w - 15 && !area; x++) { let ok = true; for (let dy = -1; dy <= 3 && ok; dy++) for (let dx = -1; dx <= 13 && ok; dx++) if (!free(x + dx, y + dy)) ok = false; if (ok) area = { x, y }; }
+      if (area) break;
+    }
+    assert(area, "a flat free area"); S.company.cash = 900000; const { x: X, y: Y } = area;
+    for (let dx = 0; dx <= 11; dx++) assert(buildTrackTile(X + dx, Y).ok, "main line");
+    for (let dx = 3; dx <= 8; dx++) buildTrackTile(X + dx, Y + 2); buildTrackTile(X + 3, Y + 1); buildTrackTile(X + 8, Y + 1);
+    const west = placeStation(X, Y, "trainStation", "player").station; placeStation(X + 1, Y, "trainStation", "player");
+    const east = placeStation(X + 11, Y, "trainStation", "player").station; placeStation(X + 10, Y, "trainStation", "player");
+    eq(stationTiles(west).length, 2, "two-tile platform");
+    S.signals[key(X + 6, Y)] = { dx: 1, dy: 0, two: false }; S.signals[key(X + 5, Y + 2)] = { dx: -1, dy: 0, two: false };
+    const loco = V.availableModels(1950, "locomotive").sort((a, b) => a.price - b.price)[0], wag = V.availableModels(1950, "wagon").find(w => w.cargo === "passengers");
+    const tm = V.buildTrainModel(loco.id, wag.id, 2); eq(trainLen(tm), 2, "a three-unit train is two tiles long");
+    const A = makeVehicle("player", tm.id, { x: X + 1, y: Y }, [west.id, east.id]); A.dir = { dx: 1, dy: 0 };
+    const B = makeVehicle("player", tm.id, { x: X + 10, y: Y }, [east.id, west.id]); B.dir = { dx: -1, dy: 0 };
+    let both = 0, clash = 0, loopUsed = false;
+    for (let d = 0; d < 160; d++) {
+      for (let f = 0; f < 4; f++) moveVehicles(0.25); dailyTick();
+      const ta = trainTiles(A).map(tk), tb = new Set(trainTiles(B).map(tk));
+      if (ta.some(k => tb.has(k))) clash++;
+      if (A.state === "moving" && B.state === "moving") both++;
+      if (trainTiles(B).some(t => t.y === Y + 2) || trainTiles(A).some(t => t.y === Y + 2)) loopUsed = true;
+    }
+    eq(clash, 0, "trains never share a tile"); assert(loopUsed, "one train took the loop"); assert(both > 10, "both trains moved at the same time: " + both);
+    assert((A.trips || 0) >= 3 && (B.trips || 0) >= 3, "both kept running: " + A.trips + " / " + B.trips);
+    // Without signals the single line is one block. With one platform at each end the two trains
+    // end up waiting for each other, so the game must say so in the news.
+    delete S.signals[key(X + 6, Y)]; delete S.signals[key(X + 5, Y + 2)];
+    let warned = false; for (let d = 0; d < 200 && !warned; d++) { for (let f = 0; f < 4; f++) moveVehicles(0.25); dailyTick(); warned = S.news.items.some(n => /waited a month for a free line/.test(n.text)); }
+    assert(warned, "a stuck train is reported in the news");
+    let clash2 = 0; const ta = new Set(trainTiles(A).map(tk)); if (trainTiles(B).some(t => ta.has(tk(t)))) clash2++; eq(clash2, 0, "still no shared tiles");
+    draw();
+  }],
+  ["rail", "Signals: straight track only, cycle one-way, reversed, two-way, off", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    const r1 = cycleSignal(a.x + 1, a.y); assert(r1.ok && !r1.signal.two && r1.signal.dx === 1, "one-way east");
+    const r2 = cycleSignal(a.x + 1, a.y); assert(r2.signal.dx === -1, "turned round"); const r3 = cycleSignal(a.x + 1, a.y); assert(r3.signal.two, "two-way");
+    const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && !r4.signal && !S.signals[key(a.x + 1, a.y)], "removed");
+    buildTrackTile(a.x + 2, a.y + 1); assert(!cycleSignal(a.x + 2, a.y).ok, "no signal on a junction");
+  }],
+  ["rail", "Longer stations: platforms join, catchment grows, trains load faster", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "72" });
+    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    const s1 = placeStation(a.x, a.y, "trainStation", "player").station; const j = placeStation(a.x + 1, a.y, "trainStation", "player");
+    assert(j.joined && j.station === s1, "joined"); placeStation(a.x + 2, a.y, "trainStation", "player"); eq(stationTiles(s1).length, 3, "three tiles");
+    assert(ST.covers(s1, a.x + 6, a.y) && !ST.covers(s1, a.x - 5, a.y), "catchment reaches from every tile");
+    bulldoze(a.x + 2, a.y); eq(stationTiles(s1).length, 2, "one tile removed"); assert(stationById(s1.id), "station remains");
+  }],
+  ["rail", "Electric locomotives need electrified track", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1980, seed: "73" });
+    S.company.cash = 900000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 6; k++) buildTrackTile(a.x + k, a.y);
+    const d = placeDepot(a.x, a.y, "rail").depot; const st = placeStation(a.x + 5, a.y, "trainStation", "player").station;
+    const el = V.availableModels(1980, "locomotive").find(l => /^(Volt|Arc)/.test(l.name)); assert(el, "an electric loco in 1980");
+    const tm = V.buildTrainModel(el.id, V.availableModels(1980, "wagon")[0].id, 3);
+    assert(!buyVehicle(tm.id, d).ok, "refused on plain track"); assert(railPath({ x: a.x, y: a.y }, new Set([key(a.x + 5, a.y)]), { elec: true }) === null, "no electric route");
+    for (let k = 0; k < 6; k++) assert(electrifyTile(a.x + k, a.y).ok, "electrified");
+    const b = buyVehicle(tm.id, d); assert(b.ok, b.msg); assert(railPath({ x: a.x, y: a.y }, new Set([key(a.x + 5, a.y)]), { elec: true }).length === 5, "electric route");
+    bulldoze(a.x + 3, a.y); assert(!isElec(a.x + 3, a.y), "wires go with the track");
   }],
   ["game", "Saved games keep the tracks and roads you built", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "41" });

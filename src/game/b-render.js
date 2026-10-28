@@ -141,7 +141,7 @@ function drawRoad(px, py, x, y) {
   ctx.beginPath(); for (const d of conn) { ctx.moveTo(px, py); ctx.lineTo(px + d[2], py + d[3]); } ctx.stroke(); ctx.setLineDash([]);
   ctx.lineCap = "butt";
 }
-function drawTrack(px, py, x, y) {
+function drawTrack(px, py, x, y, crossing) {
   const m = S.map, i = y * m.w + x, sp = S.spans[i];
   if (sp && sp.kind === "tunnel") { diamond(px, py, "rgba(0,0,0,.25)", 0.5); return; }
   const dirs = [[1, 0, TW / 4, TH / 4], [-1, 0, -TW / 4, -TH / 4], [0, 1, -TW / 4, TH / 4], [0, -1, TW / 4, -TH / 4]];
@@ -153,12 +153,32 @@ function drawTrack(px, py, x, y) {
     ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(px - 2, py + 5, 4, 8);
   }
   ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (!crossing) {
   ctx.strokeStyle = "#86775f"; ctx.lineWidth = TH * 0.52;
   ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py); for (const d of conn) { ctx.moveTo(px, py); ctx.lineTo(px + d[2], py + d[3]); } ctx.stroke();
   ctx.lineCap = "butt"; ctx.strokeStyle = "#4b3a26"; ctx.lineWidth = TH * 0.4; ctx.setLineDash([1.5, 3]);
   ctx.beginPath(); for (const d of conn) { ctx.moveTo(px, py); ctx.lineTo(px + d[2], py + d[3]); } ctx.stroke(); ctx.setLineDash([]);
+  }
   ctx.strokeStyle = "#cfd2d6"; ctx.lineWidth = 1;
   for (const off of [-2.2, 2.2]) { ctx.beginPath(); for (const d of conn) { const len = Math.hypot(d[2], d[3]), nx = -d[3] / len * off, ny = d[2] / len * off; ctx.moveTo(px + nx, py + ny); ctx.lineTo(px + d[2] + nx, py + d[3] + ny); } ctx.stroke(); }
+  const res = R.res && R.res.get(i);
+  if (crossing) {   // barriers: striped poles, lowered when a train has the crossing
+    ctx.lineWidth = 2; ctx.setLineDash([2, 2]); ctx.strokeStyle = res ? "#d22" : "#eee";
+    ctx.beginPath(); ctx.moveTo(px - 12, py - 2); ctx.lineTo(px - 12 + (res ? 10 : 2), py - 2 - (res ? 0 : 10)); ctx.moveTo(px + 12, py + 2); ctx.lineTo(px + 12 - (res ? 10 : 2), py + 2 - (res ? 0 : 10)); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (S.elec && S.elec[i]) {   // catenary: a mast and the wire over each connection
+    ctx.strokeStyle = "#5b5f66"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px + 9, py - 2); ctx.lineTo(px + 9, py - 15); ctx.stroke();
+    ctx.strokeStyle = "rgba(40,40,40,.75)"; ctx.lineWidth = 0.7; ctx.beginPath(); for (const d of conn) { ctx.moveTo(px, py - 13); ctx.lineTo(px + d[2], py + d[3] - 13); } ctx.stroke();
+  }
+  const sg = S.signals && S.signals[i];
+  if (sg) {
+    const nx = x + sg.dx, ny = y + sg.dy, free = !(R.res && R.res.get(ny * m.w + nx)) || (R.res.get(ny * m.w + nx) === res && res && false);
+    const off = iso(sg.dy, -sg.dx, 0), ox = off.x * 0.35, oy = off.y * 0.35;   // to the right of the direction of travel
+    ctx.fillStyle = "#333"; ctx.fillRect(px + ox - 1, py + oy - 13, 2, 13);
+    ctx.fillStyle = "#222"; ctx.fillRect(px + ox - 3, py + oy - 19, 6, 7);
+    ctx.fillStyle = free ? "#3ddc5a" : "#ff3b30"; ctx.beginPath(); ctx.arc(px + ox, py + oy - 15.5, 2, 0, 7); ctx.fill();
+    if (sg.two) { ctx.fillStyle = "#fff"; ctx.fillRect(px + ox - 3, py + oy - 21, 6, 2); }
+  }
 }
 function drawStation(px, py, s) {
   const col = s.owner === "player" ? PLAYER_COLOR : ((S.rivals.find(r => r.ai.id === s.owner) || {}).color || "#888");
@@ -214,9 +234,10 @@ function draw() {
       if (ov && ov.has(i)) diamond(p.x, p.y, "rgba(255,230,80,.28)", 0.98);
       const rd = R.roads.hasRoad(x, y), rl = !rd && R.rail.hasRoad(x, y);
       const ph = (rd || rl) && S.spans[i] ? iso(x, y, S.spans[i].h) : p;
+      const rl2 = R.rail.hasRoad(x, y);
       if (rd) drawRoad(ph.x, ph.y, x, y);
-      else if (rl) drawTrack(ph.x, ph.y, x, y);
-      else if (m.forest[i] && !water) { const a = hash(x, y), b = hash(y, x); drawTree(p.x - 8 + a * 6, p.y + 1, pal.tree, a > 0.5); drawTree(p.x + 7 - b * 5, p.y + 3, shade(pal.tree, 0.9), b > 0.4); if (a > 0.3) drawTree(p.x, p.y - 3 + b * 2, shade(pal.tree, 1.05), true); }
+      if (rl2) drawTrack(ph.x, ph.y, x, y, rd);
+      if (!rd && !rl2 && m.forest[i] && !water) { const a = hash(x, y), b = hash(y, x); drawTree(p.x - 8 + a * 6, p.y + 1, pal.tree, a > 0.5); drawTree(p.x + 7 - b * 5, p.y + 3, shade(pal.tree, 0.9), b > 0.4); if (a > 0.3) drawTree(p.x, p.y - 3 + b * 2, shade(pal.tree, 1.05), true); }
       const sIdx = R.stationAt.get(i); if (sIdx) drawStation(ph.x, ph.y, sIdx);
       const dIdx = R.depotAt.get(i); if (dIdx) drawDepot(ph.x, ph.y, dIdx);
       const b = R.bld.get(i); if (b) drawBuilding(p.x, p.y, b, x, y);
@@ -231,8 +252,14 @@ function draw() {
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(p.x, p.y - TH / 2); ctx.lineTo(p.x + TW / 2, p.y); ctx.lineTo(p.x, p.y + TH / 2); ctx.lineTo(p.x - TW / 2, p.y); ctx.closePath(); ctx.stroke();
   }
   // vehicles
-  const vs = S.vehicles.filter(v => !(S.spans[key(v.tile.x, v.tile.y)] || {}).kind || S.spans[key(v.tile.x, v.tile.y)].kind !== "tunnel").map(v => ({ v, pos: vehiclePos(v) })).sort((a, b) => (a.pos.gx + a.pos.gy) - (b.pos.gx + b.pos.gy));
-  for (const { v, pos } of vs) drawVehicle(v, pos);
+  const inTunnel = (x, y) => (S.spans[key(Math.round(x), Math.round(y))] || {}).kind === "tunnel";
+  const vs = [];
+  for (const v of S.vehicles) {
+    if (isTrain(v)) { for (const u of trainUnits(v)) if (!inTunnel(u.gx, u.gy)) vs.push({ v, pos: u, unit: u }); }
+    else if (!inTunnel(v.tile.x, v.tile.y)) vs.push({ v, pos: vehiclePos(v) });
+  }
+  vs.sort((a, b) => (a.pos.gx + a.pos.gy) - (b.pos.gx + b.pos.gy));
+  for (const it of vs) it.unit ? drawUnit(it.v, it.unit) : drawVehicle(it.v, it.pos);
   // labels
   if (prefs.labels && view.z >= 0.7) for (const t of m.towns) {
     if (t.x < x0 || t.x > x1 || t.y < y0 || t.y > y1) continue;
@@ -271,4 +298,41 @@ function drawVehicle(v, pos) {
   ctx.restore();
   if (v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(pos.x, pos.y - 20, 4, 0, 7); ctx.fill(); }
   else if (v.loaded > 0 && view.z > 1.2) { ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fillRect(pos.x - 3, pos.y - 20, 6, 3); }
+}
+
+// A train is drawn as its locomotive and wagons, each half a tile apart along the track it covers.
+function trainUnits(v) {
+  const m = modelOf(v); if (!m || !m.parts) return [];
+  const pts = [];
+  const head = v.state === "moving" ? { x: v.tile.x + (v.to.x - v.tile.x) * v.p, y: v.tile.y + (v.to.y - v.tile.y) * v.p } : { x: v.tile.x, y: v.tile.y };
+  pts.push(head);
+  for (const t of (v.trail || [v.tile])) if (!(pts.length === 1 && v.state !== "moving" && t.x === head.x && t.y === head.y)) pts.push(t);
+  const n = Math.min(m.parts.n, 12) + 1, out = [];
+  let seg = 0, along = 0;   // walk back along the polyline
+  for (let u = 0; u < n; u++) {
+    const want = 0.15 + u * 0.5;
+    while (seg < pts.length - 1) {
+      const a = pts[seg], b = pts[seg + 1], len = Math.hypot(b.x - a.x, b.y - a.y) || 0;
+      if (along + len >= want) {
+        const f = len ? (want - along) / len : 0, gx = a.x + (b.x - a.x) * f, gy = a.y + (b.y - a.y) * f;
+        const h0 = tileH(Math.round(a.x), Math.round(a.y)), h1 = tileH(Math.round(b.x), Math.round(b.y));
+        const p = iso(gx, gy, h0 + (h1 - h0) * f);
+        out.push({ gx, gy, x: p.x, y: p.y, dx: a.x - b.x, dy: a.y - b.y, id: u === 0 ? m.parts.locoId : m.parts.wagonId, loco: u === 0 });
+        break;
+      }
+      along += len; seg++;
+    }
+    if (seg >= pts.length - 1) break;   // the rest of the train is still inside the depot
+  }
+  if (!out.length) { const p = iso(head.x, head.y, tileH(v.tile.x, v.tile.y)); out.push({ gx: head.x, gy: head.y, x: p.x, y: p.y, dx: v.dir ? v.dir.dx : 1, dy: v.dir ? v.dir.dy : 0, id: m.parts.locoId, loco: true }); }
+  return out;
+}
+function drawUnit(v, u) {
+  const img = spriteFor(u.id); if (!img) return;
+  const k = (u.loco ? 17 : 15) / img.naturalWidth, w = img.naturalWidth * k, h = img.naturalHeight * k;
+  const facingLeft = u.dx < 0 || u.dy > 0;
+  ctx.save(); ctx.translate(u.x, u.y + 2); if (facingLeft) ctx.scale(-1, 1);
+  ctx.drawImage(img, -w / 2, -h * 0.82, w, h); ctx.restore();
+  if (u.loco && v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(u.x, u.y - 16, 4, 0, 7); ctx.fill(); }
+  else if (u.loco && v.red && view.z > 1) { ctx.fillStyle = "rgba(255,60,40,.9)"; ctx.fillRect(u.x - 2, u.y - 18, 4, 4); }
 }

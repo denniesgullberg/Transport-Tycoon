@@ -45,7 +45,7 @@ function departSound(vh) {
 // Building actions the player can take back, newest last. Each refunds what it cost.
 const UNDO_MAX = 25;
 function pushUndo(a) { R.undo.push(a); if (R.undo.length > UNDO_MAX) R.undo.shift(); updateUndoBtn(); }
-function vehicleOnTile(net, x, y) { return S.vehicles.some(v => netOf(v) === net && ((v.tile.x === x && v.tile.y === y) || (v.state === "moving" && v.to.x === x && v.to.y === y))); }
+function vehicleOnTile(net, x, y) { if (net === R.rail) return R.res.has(key(x, y)) || S.vehicles.some(v => isTrain(v) && trainTiles(v).some(t => t.x === x && t.y === y)); return R.roads.vehiclesAt({ x, y }).length > 0; }
 function refund(c) { if (c > 0) { S.company.cash += c; post("construction", c); } }
 function undoLast() {
   const a = R.undo[R.undo.length - 1]; if (!a) return { ok: false, reason: "Nothing to undo." };
@@ -57,10 +57,16 @@ function undoLast() {
       if (R.stationAt.has(i) || R.depotAt.has(i)) return { ok: false, reason: "Remove the stop or depot on that stretch first." };
       if (vehicleOnTile(net, t.x, t.y)) return { ok: false, reason: "A vehicle is on that stretch. Try again in a moment." };
     }
-    for (const t of a.tiles) { const i = key(t.x, t.y); net.removeRoad(t.x, t.y); m.occupied[i] = 0; delete S.spans[i]; }
+    for (const t of a.tiles) { const i = key(t.x, t.y); net.removeRoad(t.x, t.y); if (net === R.rail) { delete S.signals[i]; delete S.elec[i]; } if (!R.roads.hasRoad(t.x, t.y) && !R.rail.hasRoad(t.x, t.y)) { m.occupied[i] = 0; delete S.spans[i]; } }
+  } else if (a.kind === "elec") {
+    for (const t of a.tiles) delete S.elec[key(t.x, t.y)];
+  } else if (a.kind === "signal") {
+    if (a.prev) S.signals[a.k] = a.prev; else delete S.signals[a.k];
   } else if (a.kind === "station") {
     const st = stationById(a.id); if (!st) { R.undo.pop(); updateUndoBtn(); return { ok: false, reason: "That stop is already gone." }; }
-    S.stations = S.stations.filter(s => s !== st); R.stationAt.delete(key(st.x, st.y)); for (const v of S.vehicles) OR.dropStation(v.orders, st.id);
+    const t = a.tile || { x: st.x, y: st.y };
+    if (R.stationAt.get(key(t.x, t.y)) !== st) { R.undo.pop(); updateUndoBtn(); return { ok: false, reason: "That stop is already gone." }; }
+    removeStationTile(st, t.x, t.y);
   } else if (a.kind === "depot") {
     const d = depotById(a.id); if (!d) { R.undo.pop(); updateUndoBtn(); return { ok: false, reason: "That depot is already gone." }; }
     S.depots = S.depots.filter(x => x !== d); R.depotAt.delete(key(d.x, d.y));
@@ -91,17 +97,17 @@ function planTiles(a, b) {
 function startPlan(t) { if (!t) return; ui.plan = { tool: ui.tool, start: t, end: t }; refreshPlan(); }
 function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); }
 function refreshPlan() {
-  const p = ui.plan, track = p.tool === "track", unit = cost(track ? TRACK_COST : ROAD_COST);
+  const p = ui.plan, track = p.tool === "track", wire = p.tool === "electrify", unit = cost(wire ? ELEC_COST : track ? TRACK_COST : ROAD_COST);
   let total = 0, fresh = 0, bad = 0, blocked = false;
   p.tiles = planTiles(p.start, p.end).map(q => {
-    const why = track ? canBuildTrackOn(q.x, q.y) : canBuildRoadOn(q.x, q.y);
+    const why = wire ? canElectrify(q.x, q.y) : track ? canBuildTrackOn(q.x, q.y) : canBuildRoadOn(q.x, q.y);
     if (why === "exists") return { ...q, st: "have" };
     if (why || blocked) { blocked = true; bad++; return { ...q, st: "bad", why }; }
-    const c = unit + (S.map.forest[key(q.x, q.y)] ? cost(CLEAR_TREE) : 0); total += c; fresh++;
+    const c = unit + (!wire && S.map.forest[key(q.x, q.y)] ? cost(CLEAR_TREE) : 0) + (!wire && (track ? R.roads : R.rail).hasRoad(q.x, q.y) ? cost(CROSSING_EXTRA) : 0); total += c; fresh++;
     return { ...q, st: "ok", c };
   });
   p.cost = total;
-  const name = track ? "Track" : "Road";
+  const name = wire ? "Electrification" : track ? "Track" : "Road";
   $("#hint").textContent = fresh || bad ? name + ": " + fresh + " new tile" + (fresh === 1 ? "" : "s") + ", " + money(total) + (bad ? ". Stops before a blocked tile." : "") + (total > S.company.cash ? " Not enough money." : "") : name + ": already built here.";
 }
 function commitPlan() {
@@ -110,11 +116,11 @@ function commitPlan() {
   for (const q of p.tiles) {
     if (q.st === "bad") { if (q.why && q.why !== "exists") toast(q.why, true); break; }
     if (q.st !== "ok") continue;
-    const r = p.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y);
+    const r = p.tool === "electrify" ? electrifyTile(q.x, q.y) : p.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y);
     if (!r.ok) { toast(r.reason, true); break; }
     if (r.cost) { built.push({ x: q.x, y: q.y }); spent += r.cost; }
   }
-  if (built.length) { pushUndo({ kind: p.tool === "track" ? "track" : "road", tiles: built, cost: spent }); sound.play("build"); toast("Built " + built.length + " tile" + (built.length === 1 ? "" : "s") + " for " + money(spent) + "."); }
+  if (built.length) { pushUndo({ kind: p.tool === "electrify" ? "elec" : p.tool === "track" ? "track" : "road", tiles: built, cost: spent }); sound.play("build"); toast("Built " + built.length + " tile" + (built.length === 1 ? "" : "s") + " for " + money(spent) + "."); }
   setTool(ui.tool);
 }
 
