@@ -121,13 +121,13 @@ function supply(stations: Station[], x: number, y: number, cargo: string, amount
  * station, then send a vehicle, and cargo starts to appear.
  */
 export function monthlyCargo(
-  stations: Station[], towns: TownLike[], industries: IndustryLike[], rng: () => number = Math.random
+  stations: Station[], towns: TownLike[], industries: IndustryLike[], rng: () => number = Math.random, passengerScale = 1
 ): { passengers: number; mail: number; industry: number } {
   let passengers = 0, mail = 0, ind = 0;
 
   for (const t of towns) {
     for (const b of t.buildings) {
-      const base = (PASS_PER_FLOOR[b.kind] ?? 3) * b.floors * (0.7 + rng() * 0.6);
+      const base = (PASS_PER_FLOOR[b.kind] ?? 3) * b.floors * (0.7 + rng() * 0.6) * passengerScale;
       passengers += supply(stations, b.x, b.y, "passengers", base);
       mail += supply(stations, b.x, b.y, "mail", base / 3);
     }

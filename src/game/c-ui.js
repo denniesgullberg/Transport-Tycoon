@@ -158,12 +158,6 @@ function inspectAt(p, t) {
 }
 
 // ------------------------------------------------------------------- windows
-function townWin(t) {
-  openWin("town", t.name, body => {
-    body.innerHTML = "<p><b>" + t.name + "</b> is a " + t.size + ".</p><div class='kv'><span>Population</span><b>" + t.population.toLocaleString("en-GB") + "</b></div><div class='kv'><span>Buildings</span><b>" + t.buildings.length + "</b></div><div class='kv'><span>Street plan</span><b>" + t.style + "</b></div><div class='kv'><span>Stations serving it</span><b>" + t.activeStations + "</b></div>";
-    body.appendChild(btn("Fund new buildings (" + money(cost(8000 + t.population * 8)) + ")", () => { const c = cost(8000 + t.population * 8); if (S.company.cash < c) return toast("Not enough money.", true); spend("other", c); t.fundedBuildDaysLeft = EV.FUNDING_DAYS; toast("Funded. " + t.name + " will grow fast for a while."); }));
-  });
-}
 function vehiclesFor(cargo) {
   const y = S.date.year, pick = t => V.availableModels(y, t).filter(m => m.cargo === cargo).map(m => m.name);
   return { road: cargo === "passengers" ? pick("bus") : pick("truck"), rail: pick("wagon") };
@@ -257,12 +251,12 @@ function shopWin(depot, startTab) {
         h += "<h4>2. Wagon</h4><div class='list short'>" + wl.map(w => "<div class='li" + (w.id === wagonPick ? " on" : "") + "' data-a='wag' data-v='" + w.id + "'><span class='ls'>" + V.vehicleSvg(w, 26) + "</span><span class='ln'>" + w.name + "</span><span>" + w.capacity + " " + V.cargoUnitLabel(w.cargo) + "</span></div>").join("") + "</div>";
         h += "<h4>3. Locomotive</h4>";
       }
-      h += "<div class='list'>" + (inTab.length ? inTab.map(m => "<div class='li" + (sel && m.id === sel.id ? " on" : "") + "' data-a='pick' data-v='" + m.id + "'><span class='ls'>" + V.vehicleSvg(m, 30) + "</span><span class='ln'>" + m.name + "</span><span>" + money(m.price) + "</span></div>").join("") : "<p class='dim'>Nothing available yet.</p>") + "</div>";
+      h += "<div class='list'>" + (inTab.length ? inTab.map(m => "<div class='li" + (sel && m.id === sel.id ? " on" : "") + "' data-a='pick' data-v='" + m.id + "'><span class='ls'>" + V.vehicleSvg(m, 30) + "</span><span class='ln'>" + m.name + "</span><span>" + money(vehiclePrice(m)) + "</span></div>").join("") : "<p class='dim'>Nothing available yet.</p>") + "</div>";
       if (sel) {
-        let price = sel.price, speed = sel.speedKmh, runCost = sel.runningCostPerYear, capTxt = V.capacityText(sel), preview, warn = "";
+        let price = vehiclePrice(sel), speed = sel.speedKmh, runCost = sel.runningCostPerYear, capTxt = V.capacityText(sel), preview, warn = "";
         if (tab === "train") {
           const w = V.getModel(wagonPick);
-          curWagon = w; const cs = V.consistStats(sel.id, w.id, wagons); wagons = cs.n; price = cs.price; speed = cs.speedKmh; runCost = cs.runningCostPerYear; capTxt = cs.capacity + " " + V.cargoUnitLabel(w.cargo); warn = cs.warnings.join(" ");
+          curWagon = w; const cs = V.consistStats(sel.id, w.id, wagons); wagons = cs.n; price = Math.round(cs.price * S.inflation); speed = cs.speedKmh; runCost = cs.runningCostPerYear; capTxt = cs.capacity + " " + V.cargoUnitLabel(w.cargo); warn = cs.warnings.join(" ");
           if (/^(Volt|Arc|Meridian|Tempest)/.test(sel.name)) warn = (warn ? warn + " " : "") + "Electric: needs electrified track (Electrify tool), including the depot.";
           h += "<div class='kv'><span>Train length</span><b>" + trainLen({ parts: { n: cs.n } }) + " tiles</b></div>";
           preview = V.trainSvg(sel.id, w.id, cs.n, 48);
@@ -337,11 +331,12 @@ function financeWin() {
 function graphsWin() {
   openWin("graphs", "Company graphs", (body, o) => {
     const SER = { income: ["Income", "#2f8f4a"], expenses: ["Expenses", "#c0392b"], cash: ["Cash", "#d8a82e"], companyValue: ["Company value", "#2e6f9e"], cargoDelivered: ["Cargo moved", "#7b3fa0"], vehicles: ["Vehicles", "#e07b00"] };
-    let active = ["income", "expenses", "companyValue"];
+    let active = ["income", "expenses", "companyValue"], tab = "company";
     function render() {
       const d = S.history.slice(-60);
-      let h = "";
-      if (d.length < 2) h = "<p class='dim'>Not enough data yet. Let the game run for a couple of months.</p>";
+      let h = "<div class='tabs'><button data-tab='company' class='" + (tab === "company" ? "on" : "") + "'>Company</button><button data-tab='rates' class='" + (tab === "rates" ? "on" : "") + "'>Cargo payment rates</button></div>";
+      if (tab === "rates") { body.innerHTML = h + cargoRatesSvg(); return; }
+      if (d.length < 2) h += "<p class='dim'>Not enough data yet. Let the game run for a couple of months.</p>";
       else {
         const W = 320, Hh = 170, L = 44, Rr = 8, Tt = 8, B = 20;
         const mixed = active.some(k => ["cargoDelivered", "vehicles"].includes(k)) && active.some(k => !["cargoDelivered", "vehicles"].includes(k));
@@ -353,11 +348,11 @@ function graphsWin() {
         for (let t = 0; t <= 4; t++) { const v = lo + (hi - lo) * t / 4, yy = yf(lo, hi)(v); g += "<line x1='" + L + "' x2='" + (W - Rr) + "' y1='" + yy + "' y2='" + yy + "' stroke='#b8b088'/>" + (mixed ? "" : "<text x='" + (L - 4) + "' y='" + (yy + 3) + "' font-size='9' text-anchor='end' fill='#4a4426'>" + (Math.abs(v) >= 1000 ? Math.round(v / 1000) + "k" : Math.round(v)) + "</text>"); }
         d.forEach((r, i) => { if (r.month === 0) g += "<text x='" + x(i) + "' y='" + (Hh - 6) + "' font-size='9' text-anchor='middle' fill='#4a4426'>" + r.year + "</text>"; });
         for (const k of active) { const vs = vals(k); const a = mixed ? Math.min(0, ...vs) : lo, b = mixed ? Math.max(1, ...vs) : hi; g += "<polyline fill='none' stroke='" + SER[k][1] + "' stroke-width='2' points='" + vs.map((v, i) => x(i).toFixed(1) + "," + yf(a, b)(v).toFixed(1)).join(" ") + "'/>"; }
-        h = "<svg viewBox='0 0 " + W + " " + Hh + "' class='gr'>" + g + "</svg>";
+        h += "<svg viewBox='0 0 " + W + " " + Hh + "' class='gr'>" + g + "</svg>";
       }
       h += "<div class='chips'>" + Object.keys(SER).map(k => "<button data-k='" + k + "' class='" + (active.includes(k) ? "on" : "") + "' style='border-color:" + SER[k][1] + "'>" + SER[k][0] + "</button>").join("") + "</div>";
       body.innerHTML = h;
-      body.onclick = e => { const k = e.target.dataset.k; if (!k) return; active = active.includes(k) ? (active.length > 1 ? active.filter(z => z !== k) : active) : [...active, k]; render(); };
+      body.onclick = e => { if (e.target.dataset.tab) { tab = e.target.dataset.tab; render(); return; } const k = e.target.dataset.k; if (!k) return; active = active.includes(k) ? (active.length > 1 ? active.filter(z => z !== k) : active) : [...active, k]; render(); };
     }
     render(); o.refresh = null;
   });
@@ -372,8 +367,14 @@ function companyWin() {
       const m = metricsNow();
       let h = "<div class='big'>" + r.total + " <small>/ 1000</small></div><p><b>" + r.title + "</b></p><div class='scroll'><table class='tb'>" + r.parts.map(p => "<tr><td>" + p.label + "</td><td>" + p.score + " / " + p.max + "</td></tr>").join("") + "</table></div>";
       h += "<h4>Objectives</h4>" + S.objectives.map(ob => { const pr = Math.round(EV.progress(ob, m) * 100); return "<div class='obj " + ob.status + "'><div>" + ob.title + (ob.deadlineYear ? " <span class='dim'>by " + ob.deadlineYear + "</span>" : "") + (ob.status !== "active" ? " <b>(" + ob.status + ")</b>" : "") + "</div><div class='bar'><i style='width:" + pr + "%'></i></div></div>"; }).join("");
-      h += "<h4>Companies</h4><table class='tb'><tr><th>Company</th><th>Cash</th><th>Routes</th></tr><tr><td><b>" + S.name + "</b></td><td>" + money(S.company.cash) + "</td><td>" + new Set(pv.map(v => v.orders.orders.map(o => o.stationId).join(">"))).size + "</td></tr>" + S.rivals.map(rv => "<tr><td style='color:" + rv.color + "'><b>" + rv.ai.name + "</b>" + (rv.ai.bankrupt ? " (bankrupt)" : "") + "</td><td>" + money(rv.ai.cash) + "</td><td>" + rv.ai.routes.length + "</td></tr>").join("") + "</table>";
+      h += "<h4>Companies</h4><table class='tb'><tr><th>Company</th><th>Cash</th><th>Routes</th></tr><tr><td><b>" + S.name + "</b></td><td>" + money(S.company.cash) + "</td><td>" + new Set(pv.map(v => v.orders.orders.map(o => o.stationId).join(">"))).size + "</td></tr>" + S.rivals.map(rv => "<tr><td style='color:" + rv.color + "'><b>" + rv.ai.name + "</b>" + (rv.ai.bankrupt ? " (bankrupt)" : "") + "</td><td>" + money(rv.ai.cash) + "</td><td>" + (rv.ai.routes.length + (rv.rail ? rv.rail.length : 0)) + "</td></tr>").join("") + "</table>";
+      if (S.rivals.length) h += "<h4>Shares</h4>" + S.rivals.map((rv, i) => "<div class='sh'><div class='kv'><span>" + rv.ai.name + "</span><b>You own " + ((rv.shares || 0) * 25) + "% · " + money(sharePrice(rv)) + " per 25%</b></div><div class='row'><button class='gb sm' data-buy='" + i + "'" + (rv.ai.bankrupt ? " disabled" : "") + ">Buy 25%</button><button class='gb sm' data-sell='" + i + "'" + (rv.shares ? "" : " disabled") + ">Sell 25%</button></div></div>").join("") + "<p class='dim small'>Owning 100% takes the company over: its vehicles, stations and cash become yours.</p>";
       body.innerHTML = h;
+    };
+    body.onclick = e => {
+      const b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.buy != null) { const rv = S.rivals[+b.dataset.buy], r = buyShare(rv); toast(r.ok ? (r.takeover ? "Takeover complete." : "Bought 25% of " + rv.ai.name + " for " + money(r.cost) + ".") : r.reason, !r.ok); o.refresh(); }
+      if (b.dataset.sell != null) { const rv = S.rivals[+b.dataset.sell], r = sellShare(rv); toast(r.ok ? "Sold for " + money(r.value) + "." : r.reason, !r.ok); o.refresh(); }
     };
     o.refresh();
   }, { live: 2000 });

@@ -19,39 +19,44 @@ function afterStart() {
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 
-const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "" };
+const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new" };
 function showMenu(first) {
   ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
   const anySave = savesList().length > 0;
   if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
   const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
-  m.innerHTML = "<div class='mbox'><h1>Transport &amp; Co.</h1><p class='sub'>A road transport company in the style of the old classics</p>" +
-    "<div class='mcols'>" +
-    (anySave ? "<button class='gb wide big' data-act='continue'>Continue game</button>" : "") +
-    "<h3>New game</h3>" +
+  const tabs = "<div class='tabs'>" + [["new", "New game"], ["sc", "Scenarios"], ["hs", "High scores"]].map(([v, l]) => "<button data-act='v-" + v + "' class='" + (menuState.view === v ? "on" : "") + "'>" + l + "</button>").join("") + "</div>";
+  let view;
+  if (menuState.view === "sc") view = "<div class='scs'>" + SCENARIOS.map(sc => "<button class='sc' data-act='sc' data-id='" + sc.id + "'><b>" + sc.name + "</b><span>" + sc.blurb + "</span><span class='dim'>" + CLIM[sc.cfg.climate].label + " · " + sc.cfg.difficulty + " · from " + sc.cfg.startYear + "</span></button>").join("") + "</div>";
+  else if (menuState.view === "hs") view = highScores().length ? "<table class='tb'>" + highScores().map((e, i) => "<tr><td>" + (i + 1) + ". " + esc(e.name) + (e.scenario ? " <span class='dim'>" + esc(e.scenario) + (e.won ? ", won" : "") + "</span>" : "") + "</td><td>" + e.score + " " + e.title + "</td><td>" + e.year + "</td></tr>").join("") + "</table>" : "<p class='dim'>No scores yet. Retire a company to set one.</p>";
+  else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
     "<label>Difficulty</label><div class='chips'>" + opt("difficulty", "easy", "Easy") + opt("difficulty", "medium", "Medium") + opt("difficulty", "hard", "Hard") + "</div>" +
     "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + "</div>" +
     "<label>Towns</label><div class='chips'>" + opt("towns", 10, "Few") + opt("towns", 18, "Normal") + opt("towns", 26, "Many") + "</div>" +
     "<label>Rival companies</label><div class='chips'>" + [0, 1, 2, 3].map(n => opt("rivals", n, n)).join("") + "</div>" +
     "<label>Start year</label><div class='chips'>" + [1950, 1970, 1990].map(n => opt("year", n, n)).join("") + "</div>" +
-    "<label>Map seed</label><div class='row'><input id='seed' value='" + menuState.seed + "'><button class='gb sm' data-act='dice'>Random</button></div>" +
-    "<button class='gb wide big go' data-act='start'>Start game</button>" +
+    "<label>Game length</label><div class='chips'>" + opt("retire", 0, "Endless") + opt("retire", 20, "Retire after 20 years") + opt("retire", 40, "40 years") + "</div>" +
+    "<label>Map seed</label><div class='row'><input id='seed' value='" + esc(menuState.seed) + "' aria-label='Map seed'><button class='gb sm' data-act='dice'>Random</button></div>" +
+    "<button class='gb wide big go' data-act='start'>Start game</button>";
+  m.innerHTML = "<div class='mbox'><h1>Transport &amp; Co.</h1><p class='sub'>A transport company in the style of the old classics</p>" +
+    (anySave ? "<button class='gb wide big' data-act='continue'>Continue game</button>" : "") + tabs + view +
     "<div class='row'>" + (anySave ? "<button class='gb' data-act='saves'>Saved games</button>" : "") + "<button class='gb' data-act='import'>Import a save file</button></div>" +
-    "<button class='gb wide' data-act='tests'>Open test panel</button>" +
-    "</div></div>";
+    "<button class='gb wide' data-act='tests'>Open test panel</button></div>";
   m.onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.g) { menuState[b.dataset.g] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; menuState.seed = $("#seed").value; showMenu(); return; }
+    if (b.dataset.g) { menuState[b.dataset.g] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
     const a = b.dataset.act;
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed });
+      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
+    if (a === "v-new" || a === "v-sc" || a === "v-hs") { menuState.view = a.slice(2); const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
+    if (a === "sc") { startScenario(b.dataset.id); closeAllWins(); hideMenu(); afterStart(); }
     if (a === "import") pickSaveFile();
     if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
   };
@@ -66,6 +71,9 @@ function menuWin() {
     c.appendChild(btn("Save and load…", () => { closeWin("menu"); savesWin(); }));
     c.appendChild(btn("Settings", () => { closeWin("menu"); settingsWin(); }));
     c.appendChild(btn("Test panel", () => { closeWin("menu"); testsWin(); }));
+    let armed = false;
+    const rb = btn("Retire now", () => { if (!armed) { armed = true; rb.textContent = "Tap again to retire and see your score"; rb.classList.add("danger"); return; } closeAllWins(); endGame("retired"); });
+    c.appendChild(rb);
     c.appendChild(btn("Main menu", () => { closeAllWins(); showMenu(); }));
   });
 }
@@ -152,7 +160,8 @@ function spotNear(x, y, r, tx, ty) {
   }
   return best;
 }
-function findEnds(cargo) {
+function findEnds(cargo, minDist) {
+  minDist = minDist || 10;
   const m = S.map; let pairs = [];
   if (cargo === "passengers" || cargo === "mail") { const ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 10); for (const a of ts) for (const b of ts) if (a !== b) pairs.push([a, b, 4, 4]); }
   else {
@@ -160,12 +169,12 @@ function findEnds(cargo) {
     for (const a of from) for (const b of to) pairs.push([a, b, 2, 2]);
     if (cargo === "goods") { pairs = []; const ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8); for (const a of from) for (const b of ts) pairs.push([a, b, 2, 4]); }
   }
-  pairs = pairs.filter(([a, b]) => { const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y); return d >= 10 && d <= 48; }).sort((p, q) => (Math.abs(p[0].x - p[1].x) + Math.abs(p[0].y - p[1].y)) - (Math.abs(q[0].x - q[1].x) + Math.abs(q[0].y - q[1].y)));
+  pairs = pairs.filter(([a, b]) => { const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y); return d >= minDist && d <= Math.max(48, minDist + 20); }).sort((p, q) => (Math.abs(p[0].x - p[1].x) + Math.abs(p[0].y - p[1].y)) - (Math.abs(q[0].x - q[1].x) + Math.abs(q[0].y - q[1].y)));
   for (const [a, b, ra, rb] of pairs) { const sa = spotNear(a.x, a.y, ra, b.x, b.y), sb = spotNear(b.x, b.y, rb, a.x, a.y); if (sa && sb && Math.abs(sa.x - sb.x) + Math.abs(sa.y - sb.y) >= 8) return { a: sa, b: sb, from: a, to: b }; }
   return null;
 }
-function buildDemoLine(mode, cargo) {
-  const ends = findEnds(cargo); if (!ends) return { ok: false, msg: "No suitable " + cargo + " pair on this map." };
+function buildDemoLine(mode, cargo, minDist) {
+  const ends = findEnds(cargo, minDist); if (!ends) return { ok: false, msg: "No suitable " + cargo + " pair on this map." };
   const net = netFor(mode === "rail" ? "rail" : "road"), other = mode === "rail" ? R.roads : R.rail, m = S.map;
   const api = { width: m.w, height: m.h, tileCost(x, y) { const i = key(x, y); if (m.water[i] || other.hasRoad(x, y)) return null; if (net.hasRoad(x, y)) return 1; if (m.occupied[i]) return null; return 4 + (m.forest[i] ? 2 : 0); } };
   const path = AI.findPath(api, ends.a, ends.b); if (!path || path.length < 5) return { ok: false, msg: "No buildable route between the two spots." };
@@ -188,11 +197,11 @@ function demoBuy(line, count) {
     const list = V.availableModels(y, line.cargo === "passengers" ? "bus" : "truck"); const m = list.filter(x => x.cargo === line.cargo).sort((a, b) => a.price - b.price)[0];
     if (!m) return { ok: false, msg: "No vehicle for " + line.cargo }; id = m.id;
   }
-  let last = null; for (let i = 0; i < (count || 1); i++) { last = buyVehicle(id, line.depot); if (!last.ok) return last; if (!last.vh.orders.orders.length) { addStopTo(last.vh, line.s1.id); addStopTo(last.vh, line.s2.id); } }
+  let last = null; for (let i = 0; i < (count || 1); i++) { last = buyVehicle(id, line.depot); if (!last.ok) return last; if (!last.vh.orders.orders.length) { addStopTo(last.vh, line.s1.id); addStopTo(last.vh, line.s2.id); } if (line.mode === "rail" && line.cargo !== "passengers") last.vh.orders.orders[0].load = "full"; }
   return last;
 }
-function demoLine(mode, cargo, count) {
-  const l = buildDemoLine(mode, cargo); if (!l.ok) return l;
+function demoLine(mode, cargo, count, minDist) {
+  const l = buildDemoLine(mode, cargo, minDist); if (!l.ok) return l;
   const b = demoBuy(l, count); if (!b.ok) return { ok: false, msg: b.msg };
   centerOn(l.s1.x, l.s1.y); return { ok: true, line: l, vh: b.vh };
 }

@@ -4,8 +4,10 @@ const { core, vehicles: V, mapgen, terrain, roadnet, stations: ST, orders: OR, e
 
 // ------------------------------------------------------------------ constants
 const TW = 40, TH = 20, HS = 7;
-const INCOME_SCALE = 0.05;           // tycoon-core pays far more than the original; this brings it to a playable level
-const FREIGHT_BONUS = 2.5, TRAIN_BONUS = 1.6;   // freight and trains pay more per unit so they are worth their running costs
+const INCOME_SCALE = 0.11;           // tycoon-core pays far more than the original; this brings it to a playable level
+const PRIMARY_OUTPUT = 2;            // mines, forests and farms produce this many times the map generator's figure
+const PRIMARY = ["coalMine", "forest", "farm"];
+const FREIGHT_BONUS = 2.0, TRAIN_BONUS = 1.4, PASSENGER_OUTPUT = 1.5;   // freight and trains pay more per unit so they are worth their running costs
 const DAY_SECONDS = 0.4;             // real seconds per game day at 1x
 const ROAD_COST = 120, STATION_COST = 600, DEPOT_COST = 1500, TRACK_COST = 180, RAIL_STATION_COST = 1800, RAIL_DEPOT_COST = 2600, CLEAR_TREE = 40, BULLDOZE = 60;
 
@@ -16,9 +18,9 @@ const CLIM = {
   toyland:   { label: "Toyland", map: { lakes: 0.6, hills: 0.3, forests: 0.55, rivers: 2 }, grass: "#f0a2c4", grass2: "#eb98bc", water: "#8ad0f0", hill: "#ffd36b", snow: null, tree: "#7a4fd0" },
 };
 const DIFF = {
-  easy:   { startingCash: 150000, maxLoan: 500000, interestRate: 0.04, inflation: false, breakdowns: 0,   cost: 0.7, growth: 1.6, rivals: 1 },
-  medium: { startingCash: 85000,  maxLoan: 300000, interestRate: 0.08, inflation: true,  breakdowns: 0.5, cost: 1,   growth: 1,   rivals: 2 },
-  hard:   { startingCash: 50000,  maxLoan: 200000, interestRate: 0.12, inflation: true,  breakdowns: 1,   cost: 1.5, growth: 0.6, rivals: 3 },
+  easy:   { startingCash: 150000, maxLoan: 500000, interestRate: 0.04, inflation: false, breakdowns: 0,   cost: 0.7, growth: 1.6, rivals: 1, income: 1.2 },
+  medium: { startingCash: 85000,  maxLoan: 300000, interestRate: 0.08, inflation: true,  breakdowns: 0.5, cost: 1,   growth: 1,   rivals: 2, income: 1 },
+  hard:   { startingCash: 50000,  maxLoan: 200000, interestRate: 0.12, inflation: true,  breakdowns: 1,   cost: 1.5, growth: 0.6, rivals: 3, income: 0.85 },
 };
 const CARGO_FROM_IND = { coalMine: "coal", forest: "wood", farm: "grain", sawmill: "goods", factory: "goods", steelMill: "steel" };
 const CARGO_TO_IND = { coal: ["powerStation", "steelMill"], wood: ["sawmill"], grain: ["factory"], goods: [], steel: ["factory"] };
@@ -45,6 +47,7 @@ function newGame(cfg) {
   const settings = { ...DIFF[cfg.difficulty] };
   if (cfg.rivals != null) settings.rivals = cfg.rivals;
   const map = mapgen.generateMap(String(cfg.seed), { size: cfg.mapSize, towns: cfg.towns, ...CLIM[cfg.climate].map });
+  for (const i of map.industries) if (PRIMARY.includes(i.kind)) i.productionPerMonth *= PRIMARY_OUTPUT;
   const company = core.newCompany();
   company.cash = settings.startingCash; company.maxLoan = settings.maxLoan; company.interestRate = settings.interestRate;
   S = {
@@ -53,7 +56,7 @@ function newGame(cfg) {
     news: EV.newNewsLog(), evState: EV.newEventState(), objectives: EV.defaultObjectives(cfg.startYear),
     ledgers: [], acc: {}, history: [], metrics: { passengers: 0, cargo: 0, quarterCargo: 0 },
     qIncome: 0, quarterlyIncome: [], monthNet: [], bank: "ok", gameOver: false,
-    rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, name: "Oakwood Transport",
+    rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, townRating: {}, ads: {}, railOwner: {}, replace: { renew: false, rules: {} }, retireYear: cfg.retireYears ? cfg.startYear + cfg.retireYears : null, name: "Oakwood Transport",
   };
   for (let i = 0; i < settings.rivals; i++) S.rivals.push({ ai: AI.createAi(i, settings.startingCash, 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] });
   initRuntime();
@@ -182,16 +185,18 @@ function buyVehicle(modelId, depot) {
   const dk = depotKindOf(m);
   if ((depot.kind || "road") !== dk) return { ok: false, msg: dk === "rail" ? "Trains are built at a train depot on a track." : "Buses and trucks are built at a road depot." };
   if (isTrainModel(m) && /^(Volt|Arc|Meridian|Tempest)/.test((V.getModel(m.parts.locoId) || {}).name || "") && !isElec(depot.x, depot.y)) return { ok: false, msg: "Electric locomotives need electrified track. Electrify the depot and the line first." };
-  if (S.company.cash < m.price) return { ok: false, msg: "Not enough money." };
+  if ((depot.owner || "player") !== "player") return { ok: false, msg: "That depot belongs to another company." };
+  const price = vehiclePrice(m);
+  if (S.company.cash < price) return { ok: false, msg: "Not enough money." };
   const pair = bestPair(m.cargo, depot, stationKindFor(m), netFor(dk));
-  spend("newVehicles", m.price);
+  spend("newVehicles", price);
   const vh = makeVehicle("player", modelId, depot, pair || []);
   sound.play("build");
   return { ok: true, vh, pair };
 }
 function sellVehicle(vh) {
   const m = modelOf(vh);
-  const val = core.vehicleSalePrice(vh.core, m);
+  const val = saleValue(vh);
   S.company.cash += val; post("other", val);
   removeVehicle(vh);
   sound.play("cash");
@@ -202,13 +207,13 @@ function destTile(vh) {
   const d = OR.destination(vh.orders); if (!d) return null;
   if (d.kind === "stop") { const s = stationById(d.id); return s ? { x: s.x, y: s.y, kind: "stop", id: s.id } : null; }
   let dp = d.id ? depotById(d.id) : null;
-  if (!dp) { dp = nearestDepot(vh.tile, depotKindOf(modelOf(vh))); }
+  if (!dp) { dp = nearestDepot(vh.tile, depotKindOf(modelOf(vh)), vh.owner); }
   return dp ? { x: dp.x, y: dp.y, kind: "depot", id: dp.id } : null;
 }
-function nearestDepot(t, dk) {
-  dk = dk || "road"; const net = netFor(dk);
+function nearestDepot(t, dk, owner) {
+  dk = dk || "road"; owner = owner || "player"; const net = netFor(dk);
   let best = null, bd = 1e9;
-  for (const d of S.depots) { if ((d.kind || "road") !== dk) continue; const dist = Math.abs(d.x - t.x) + Math.abs(d.y - t.y); if (dist < bd && net.connected(d, t)) { bd = dist; best = d; } }
+  for (const d of S.depots) { if ((d.kind || "road") !== dk || (d.owner || "player") !== owner) continue; const dist = Math.abs(d.x - t.x) + Math.abs(d.y - t.y); if (dist < bd && net.connected(d, t)) { bd = dist; best = d; } }
   return best;
 }
 
@@ -260,7 +265,7 @@ function dock(vh, dest) {
     const days = Math.max(0, S.totalDays - vh.loadDay);
     const raw = ST.payForDelivery(from, st, vh.cargo, vh.loaded, days, S.inflation);
     const mult = ((vh.cargo === "passengers" || vh.cargo === "mail") ? 1 : FREIGHT_BONUS) * (isTrainModel(m) ? TRAIN_BONUS : 1);
-    const inc = Math.max(1, Math.round(raw * INCOME_SCALE * mult));
+    const inc = Math.max(1, Math.round(raw * INCOME_SCALE * mult * (S.settings.income || 1)));
     const cat = isTrainModel(m) ? "incomeRail" : "incomeRoad";
     S.company.cash += inc; post(cat, inc); S.qIncome += inc;
     if (vh.cargo === "passengers") S.metrics.passengers += vh.loaded; else S.metrics.cargo += vh.loaded;
@@ -283,7 +288,7 @@ function dailyVehicle(vh) {
     const c = core.vehicleRunningCostPerDay(m, S.inflation);
     S.company.cash -= c; post(isTrainModel(m) ? "runningRail" : "runningRoad", -c); vh.profit.thisYear -= c; vh.profit.lifetime -= c;
     if (vh.state !== "docked" && S.depots.some(d => (d.kind || "road") === depotKindOf(m))) {
-      const dp = nearestDepot(vh.tile, depotKindOf(m));
+      const dp = nearestDepot(vh.tile, depotKindOf(m), vh.owner);
       OR.maybeInsertService(vh.orders, core.needsService(vh.core), dp ? dp.id : undefined);
     }
   }
@@ -295,7 +300,7 @@ function dailyVehicle(vh) {
         ST.recordPickup(st, vh.cargo, m.speedKmh, vh.core.ageDays / 365);
         if (vh.loaded === 0 || vh.origin === st.id) {
           // trains load a set amount per day for each platform tile they stand on
-          const cap = isTrainModel(m) ? Math.max(1, platformTilesUnder(vh, st)) * 30 : Infinity;
+          const cap = isTrainModel(m) ? Math.max(1, platformTilesUnder(vh, st)) * 60 : Infinity;
           const want = Math.min(m.capacity - vh.loaded, cap);
           const got = ST.loadOnto(st, vh.cargo, want);
           if (got > 0) { if (vh.loaded === 0) { vh.origin = st.id; vh.loadDay = S.totalDays; } vh.loaded += got; }
@@ -323,8 +328,9 @@ function moveVehicles(dtDays) {
         const keep = vh.p; tryStep(vh); if (vh.state === "moving") vh.p = keep; else vh.p = 0;
       }
     } else if (vh.state === "idle") {
-      vh.wait2 = (vh.wait2 || 0) + 1;
-      if (vh.wait2 % 6 === 0) tryStep(vh);
+      // retry a few times a day of game time, so it behaves the same at any frame rate
+      vh.idleT = (vh.idleT || 0) + dtDays;
+      if (vh.idleT >= 0.2) { vh.idleT = 0; tryStep(vh); }
     }
   }
 }
@@ -346,6 +352,7 @@ function dailyTick() {
     }
   }
   for (const s of S.stations) ST.tickStationDay(s);
+  adsDaily();
   for (const vh of S.vehicles.slice()) dailyVehicle(vh);
   if (st.newMonth) monthlyTick();
   if (st.newQuarter) quarterlyTick();
@@ -353,7 +360,7 @@ function dailyTick() {
 }
 
 function companyValue() {
-  const vv = playerVehicles().map(v => core.vehicleSalePrice(v.core, modelOf(v)));
+  const vv = playerVehicles().map(v => saleValue(v));
   return Math.round(S.company.cash - S.company.loan + vv.reduce((a, b) => a + b, 0) + S.stations.filter(s => s.owner === "player").length * 500);
 }
 function townsConnected() {
@@ -367,11 +374,12 @@ function metricsNow() {
 
 function monthlyTick() {
   ageWarnings();
+  townMonthly();
   const m = S.map;
   const before = S.company.cash;
   for (const i of m.industries) core.tickIndustryMonth(i, rng);
   for (const i of m.industries) { const r = serviceRatingOf(i.id); if (CARGO_FROM_IND[i.kind] && ["coalMine", "forest", "farm"].includes(i.kind)) core.serviceBonus(i, r, rng); }
-  ST.monthlyCargo(S.stations, m.towns, m.industries, rng);
+  ST.monthlyCargo(S.stations, m.towns, m.industries, rng, PASSENGER_OUTPUT);
   ST.decayWaiting(S.stations);
   ST.updateTownActivity(m.towns, S.stations);
   const interest = core.chargeMonthlyInterest(S.company); post("interest", -interest);
@@ -385,16 +393,18 @@ function monthlyTick() {
   for (const a of actions) {
     if (a.kind === "setProduction") { const i = m.industries.find(x => x.id === a.industryId); if (i) i.productionPerMonth = a.value; }
     if (a.kind === "closeIndustry") removeIndustry(a.industryId);
-    if (a.kind === "openIndustry") { const s = mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) rebuildLookups(); }
+    if (a.kind === "openIndustry") { const s = mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) { const ni = m.industries[m.industries.length - 1]; if (PRIMARY.includes(ni.kind)) ni.productionPerMonth *= PRIMARY_OUTPUT; rebuildLookups(); } }
     if (a.kind === "setInterestRate") S.company.interestRate = a.value;
   }
   const reward = EV.checkObjectives(S.objectives, metricsNow(), S.date, S.news);
   if (reward) { S.company.cash += reward; post("other", reward); sound.play("cash"); }
+  scenarioCheck();
   // rivals plan
   const ends = mapgen.toEndpoints(m);
   for (const rv of S.rivals) {
     const log = AI.tickAiMonth(rv.ai, aiApi(rv), ends, S.date.year, rng);
     for (const line of log) EV.addNews(S.news, S.date, "info", line);
+    rivalRailMonth(rv);
   }
   let inc = 0, exp = 0; for (const k of Object.keys(S.acc)) { if (S.acc[k] > 0) inc += S.acc[k]; else exp -= S.acc[k]; }
   monthIncomeTrack(inc, exp);
@@ -409,13 +419,14 @@ function quarterlyTick() {
   S.quarterlyIncome.push(S.qIncome); if (S.quarterlyIncome.length > 4) S.quarterlyIncome.shift(); S.qIncome = 0; S.metrics.quarterCargo = 0;
   const b = core.checkBankruptcy(S.company); S.bank = b;
   if (b === "warning") EV.addNews(S.news, S.date, "bad", "Warning: your company is running at a loss.");
-  if (b === "bankrupt") { S.gameOver = true; ui.paused = true; EV.addNews(S.news, S.date, "bad", "Your company has gone bankrupt."); sound.play("crash"); }
+  if (b === "bankrupt") { EV.addNews(S.news, S.date, "bad", "Your company has gone bankrupt."); sound.play("crash"); endGame("bankrupt"); }
 }
 function yearlyTick() {
   if (S.settings.inflation) S.inflation = core.nextInflation(S.inflation);
   S.company.maxLoan = Math.round(S.settings.maxLoan * S.inflation / 10000) * 10000;
   for (const v of S.vehicles) { v.profit.lastYear = v.profit.thisYear; v.profit.thisYear = 0; }
   EV.addNews(S.news, S.date, "info", "New year " + S.date.year + ". New vehicle models may be available.");
+  if (S.retireYear && S.date.year >= S.retireYear) endGame("retired");
   sound.play("newYear");
 }
 function removeIndustry(id) {
@@ -446,7 +457,7 @@ function buildRoadTile(x, y, ownerPays = true) {
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
   let c = cost(ROAD_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.rail.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
-  if (ownerPays) { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
 }
@@ -464,7 +475,7 @@ function buildTrackTile(x, y, ownerPays = true) {
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
   const c = cost(TRACK_COST) + (S.map.forest[i] ? cost(CLEAR_TREE) : 0) + (R.roads.hasRoad(x, y) ? cost(CROSSING_EXTRA) : 0);
-  if (ownerPays) { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  if (ownerPays) { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); if (S.map.forest[i]) treeCut(x, y); }
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.rail.addRoad(x, y);
   return { ok: true, cost: c };
 }
@@ -472,8 +483,9 @@ function placeStation(x, y, kind, owner) {
   const rail = kind === "trainStation";
   if (!netFor(rail ? "rail" : "road").hasRoad(x, y)) return { ok: false, reason: rail ? "Build a train station on a track tile." : "Build a stop on a road tile." };
   if (R.stationAt.has(key(x, y)) || R.depotAt.has(key(x, y))) return { ok: false, reason: "There is already a building here." };
+  if (rail && railOwnerOf(key(x, y)) !== owner) return { ok: false, reason: "That track belongs to another company." };
   const c = cost(rail ? RAIL_STATION_COST : STATION_COST);
-  if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   const join = owner === "player" ? stationNeighbour(x, y, kind, owner) : null;
   if (join) {
     if (!join.tiles) join.tiles = [{ x: join.x, y: join.y }];
@@ -484,14 +496,14 @@ function placeStation(x, y, kind, owner) {
   s.owner = owner; s.tiles = [{ x, y }]; S.stations.push(s); R.stationAt.set(key(x, y), s);
   return { ok: true, station: s, cost: c, tile: { x, y } };
 }
-function placeDepot(x, y, dk) {
-  dk = dk || "road";
+function placeDepot(x, y, dk, owner) {
+  dk = dk || "road"; owner = owner || "player";
   if (!netFor(dk).hasRoad(x, y)) return { ok: false, reason: dk === "rail" ? "Build a train depot on a track tile." : "Build a depot on a road tile." };
   if (R.stationAt.has(key(x, y)) || R.depotAt.has(key(x, y))) return { ok: false, reason: "There is already a building here." };
+  if (dk === "rail" && railOwnerOf(key(x, y)) !== owner) return { ok: false, reason: "That track belongs to another company." };
   const c = cost(dk === "rail" ? RAIL_DEPOT_COST : DEPOT_COST);
-  if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
-  spend("construction", c);
-  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + (dk === "rail" ? " Train Depot" : " Depot"), x, y, kind: dk };
+  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + (dk === "rail" ? " Train Depot" : " Depot"), x, y, kind: dk, owner };
   S.depots.push(d); R.depotAt.set(key(x, y), d);
   return { ok: true, depot: d, cost: c };
 }
@@ -504,6 +516,8 @@ function removeStationTile(st, x, y) {
 function bulldoze(x, y) {
   const m = S.map, i = key(x, y);
   const st = R.stationAt.get(i), dp = R.depotAt.get(i);
+  if ((st && st.owner !== "player") || (dp && (dp.owner || "player") !== "player")) return { ok: false, reason: "That belongs to another company." };
+  if (!st && !dp && R.rail.hasRoad(x, y) && railOwnerOf(i) !== "player") return { ok: false, reason: "That track belongs to another company." };
   // A stop or depot comes off first; the road or track under it stays until the next tap.
   if (st || dp) {
     const c = cost(BULLDOZE);
@@ -517,7 +531,7 @@ function bulldoze(x, y) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
     spend("construction", c);
-    R.roads.removeRoad(x, y);
+    R.roads.removeRoad(x, y); roadRemoved(x, y);
     const sp = S.spans[i]; if (sp) delete S.spans[i];
     if (!sp || sp.kind === "tunnel") m.occupied[i] = 0; else if (!m.water[i]) m.occupied[i] = 0; else m.occupied[i] = 0;
     for (const v of S.vehicles.slice()) if (!isTrain(v) && (v.tile.x === x && v.tile.y === y || (v.state === "moving" && v.to.x === x && v.to.y === y))) removeVehicle(v);
@@ -582,10 +596,11 @@ function aiApi(rv) {
     },
     buyVehicle(owner, modelId, from, to) {
       const mod = V.getModel(modelId); if (!mod) return null;
+      if (vehiclePrice(mod) > rv.ai.cash) return null;
       const s = stationById(from); if (!s) return null;
       const vh = makeVehicle(rv.ai.id, modelId, s, [from, to]);
       vh.cargo = mod.cargo; vh.core.breakdownsEnabled = false;
-      return mod.price;
+      return vehiclePrice(mod);
     },
   };
 }

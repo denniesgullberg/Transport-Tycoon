@@ -89,6 +89,7 @@ function railPath(start, goals, opt) {
       const nx = x + dx, ny = y + dy; if (!inB(nx, ny) || !R.rail.hasRoad(nx, ny)) continue;
       const nk = ny * W + nx; if (closed.has(nk)) continue;
       if (opt.elec && !isElec(nx, ny)) continue;
+      if (opt.owner && railOwnerOf(nk) !== opt.owner) continue;
       if (blocksEntry(nk, dx, dy)) continue;
       if (opt.avoid && opt.avoid(nk)) continue;
       const ng = g.get(k) + 1 + (opt.costOf ? opt.costOf(nk) : 0);
@@ -110,7 +111,7 @@ function reserveAhead(vh, goals) {
   const busyCost = (k) => { const o = R.res.get(k); return o && o !== vh.id ? 40 : 0; };
   const tryFrom = () => {
     const body = new Set(trainTiles(vh).map(tk)); body.delete(tk(vh.tile));
-    return railPath(vh.tile, goals, { elec, avoid: (k) => body.has(k), costOf: busyCost });
+    return railPath(vh.tile, goals, { elec, owner: vh.owner, avoid: (k) => body.has(k), costOf: busyCost });
   };
   let path = tryFrom();
   if (!path) {

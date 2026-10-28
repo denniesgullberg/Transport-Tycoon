@@ -427,8 +427,8 @@ const TESTS = [
   ["fleet", "Stop, start, stop in depot and clone", () => {
     let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "coal", 1); if (r.ok) break; }
     assert(r && r.ok, "line"); const vh = r.vh; simulateDays(5);
-    toggleStopped(vh); const at = { ...vh.tile }, cash = S.company.cash; simulateDays(10);
-    assert(sameT(vh.tile, at) && vh.state !== "moving", "a stopped vehicle stays put"); assert(S.company.cash >= cash - 1, "and costs nothing to run");
+    toggleStopped(vh); const at = { ...vh.tile }, p0 = vh.p, cash = S.company.cash; simulateDays(10);
+    assert(sameT(vh.tile, at) && vh.p === p0, "a stopped vehicle stays put"); assert(S.company.cash >= cash - 1, "and costs nothing to run");
     toggleStopped(vh); assert(sendToDepot(vh, true).ok, "sent to depot");
     for (let d = 0; d < 120 && !vh.stopped; d++) simulateDays(1);
     assert(vh.stopped && R.depotAt.get(key(vh.tile.x, vh.tile.y)), "stopped inside the depot");
@@ -471,6 +471,64 @@ const TESTS = [
     v3.bay = null; const bay = bayFor(v3, st); assert(sameT(bay, nb), "a full bay sends the next bus to the other one");
     const trips = S.vehicles.reduce((a, v) => a + (v.trips || 0), 0); simulateDays(120);
     assert(S.vehicles.reduce((a, v) => a + (v.trips || 0), 0) > trips + 4, "buses keep running with two bays"); draw();
+  }],
+  ["towns", "Town councils: tree cutting hurts, bad rating blocks building, trees and ads help", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "81" });
+    S.company.cash = 900000; const t = S.map.towns[0]; const r0 = townRating(t);
+    let f = null; for (let dy = -t.radius - 2; dy <= t.radius + 2 && !f; dy++) for (let dx = -t.radius - 2; dx <= t.radius + 2 && !f; dx++) { const x = t.x + dx, y = t.y + dy; if (inB(x, y) && S.map.forest[key(x, y)] && !S.map.occupied[key(x, y)] && townZone(x, y) === t) f = { x, y }; }
+    if (!f) { f = spotNear(t.x + t.radius, t.y, 3, t.x, t.y); S.map.forest[key(f.x, f.y)] = 1; }
+    buildRoadTile(f.x, f.y); assert(townRating(t) < r0, "cutting trees lowers the rating");
+    S.townRating[t.id] = -600; const rd = R.roads.nearestRoad(t.x, t.y, 6);
+    const no = placeStation(rd.x, rd.y, "busStop", "player"); assert(!no.ok && /council refuses/.test(no.reason), "council refuses at Appalling");
+    const pt = plantTrees(t); assert(pt.ok && townRating(t) > -600, "planting trees helps");
+    S.townRating[t.id] = 100; assert(placeStation(rd.x, rd.y, "busStop", "player").ok, "allowed again");
+    const ad = advertise(t, 2); assert(ad.ok && S.ads[t.id], "campaign running"); const st = R.stationAt.get(key(rd.x, rd.y)); st.served.passengers = true; st.daysSincePickup.passengers = 40; adsDaily(); assert(st.daysSincePickup.passengers <= 2, "ads lift the station rating");
+    eq(ratingLabel(-500), "Appalling"); eq(ratingLabel(900), "Outstanding");
+    townWin(t); assert(document.querySelector(".win[data-id=town]").textContent.includes("Council rating"), "town window shows the rating"); closeAllWins();
+  }],
+  ["rivals", "Rivals build their own railways and compete; their track is off limits", () => {
+    let rv = null;
+    for (const seed of ["11", "12", "13", "14", "15", "16"]) {
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed });
+      rv = S.rivals[0]; rv.ai.cash = 2000000; const keep = rng;
+      for (let k = 0; k < 40 && !(rv.rail && rv.rail.length); k++) rivalRailMonth(rv);
+      if (rv.rail && rv.rail.length) break;
+    }
+    assert(rv.rail && rv.rail.length, "a rival railway was built");
+    const train = S.vehicles.find(v => v.owner === rv.ai.id && isTrain(v)); assert(train, "rival runs a train");
+    const ownedK = Object.keys(S.railOwner).find(k => S.railOwner[k] === rv.ai.id); const t = kt(+ownedK);
+    assert(!bulldoze(t.x, t.y).ok, "player cannot bulldoze rival track");
+    const rst = S.stations.find(s => s.owner === rv.ai.id && s.kind === "trainStation");
+    assert(railPath(train.tile, new Set([tk(rst)]), { owner: "player" }) === null, "player trains cannot use rival track");
+    const before = rv.ai.cash; for (let d = 0; d < 300; d++) { for (let f = 0; f < 2; f++) moveVehicles(0.5); dailyTick(); }
+    assert((train.trips || 0) >= 2, "rival train runs: " + train.trips);
+  }],
+  ["rivals", "Buy shares; 100% takes the rival over", () => {
+    let rv = null;
+    for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed }); simulateDays(400); rv = S.rivals[0]; if (S.vehicles.some(v => v.owner === rv.ai.id)) break; }
+    S.company.cash = 50000000; const p = sharePrice(rv); assert(p >= 5000, "share price");
+    assert(buyShare(rv).ok && rv.shares === 1, "bought 25%"); assert(sellShare(rv).ok && rv.shares === 0, "sold");
+    const fleet = S.vehicles.filter(v => v.owner === rv.ai.id).length;
+    for (let k = 0; k < 4; k++) buyShare(rv);
+    eq(S.rivals.length, 0, "rival gone"); assert(S.vehicles.filter(v => v.owner === "player").length >= fleet, "its vehicles are yours");
+    assert(S.news.items.some(n => /taken over/.test(n.text)), "takeover news");
+  }],
+  ["goals", "Scenarios, retirement and the high-score table", () => {
+    assert(startScenario("coal"), "scenario starts"); eq(S.objectives[0].id, "scenario-goal"); eq(S.scenario, "coal");
+    S.metrics.cargo = 25000; monthlyTick(); eq(S.scenarioDone, "won", "scenario won");
+    const e = endGame("retired"); assert(e && highScores().some(h => h.when === e.when), "score saved");
+    assert(!$("#gameover").hidden && $("#gameover").textContent.includes("High scores"), "end screen");
+    $("#gameover").hidden = true;
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "82", retireYears: 1 });
+    eq(S.retireYear, 1951); simulateDays(370); assert(S.ended === "retired", "retires at the chosen year"); $("#gameover").hidden = true;
+  }],
+  ["money", "Cargo payment chart, and vehicle prices follow inflation", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "83" });
+    const svg = cargoRatesSvg(); eq((svg.match(/<polyline/g) || []).length, 7, "seven cargo lines");
+    let r; for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = buildDemoLine("road", "passengers"); if (r.ok) break; }
+    S.inflation = 2; const bus = V.availableModels(1950, "bus")[0]; const c0 = S.company.cash; buyVehicle(bus.id, r.depot);
+    eq(Math.round(c0 - S.company.cash), bus.price * 2, "price doubled with inflation");
+    graphsWin(); const w = document.querySelector(".win[data-id=graphs]"); w.querySelector("[data-tab=rates]").click(); assert(w.querySelectorAll("polyline").length === 7, "rates tab"); closeAllWins();
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

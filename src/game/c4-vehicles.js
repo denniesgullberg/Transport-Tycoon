@@ -18,7 +18,7 @@ function isoSprite(img, x, y, w, h, dx, dy) {
 // ---- start, stop, depot
 function toggleStopped(vh) { vh.stopped = !vh.stopped; if (!vh.stopped) { vh.state = vh.state === "docked" ? "docked" : "idle"; } return vh.stopped; }
 function sendToDepot(vh, andStop) {
-  const dp = nearestDepot(vh.tile, depotKindOf(modelOf(vh)));
+  const dp = nearestDepot(vh.tile, depotKindOf(modelOf(vh)), vh.owner);
   if (!dp) return { ok: false, reason: "Build a depot on the same road or track first." };
   const cur = OR.currentOrder(vh.orders);
   if (!(cur && cur.kind === "depot")) vh.orders.orders.splice(vh.orders.current, 0, { kind: "depot", depotId: dp.id, temp: true });
@@ -29,7 +29,7 @@ function sendToDepot(vh, andStop) {
 function inDepot(vh) { const d = R.depotAt.get(key(vh.tile.x, vh.tile.y)); return d && vh.state === "docked" && OR.currentOrder(vh.orders) && OR.currentOrder(vh.orders).kind === "depot" ? d : (d && vh.stopped ? d : null); }
 function cloneVehicle(vh) {
   const m = modelOf(vh), dk = depotKindOf(m);
-  const dp = inDepot(vh) || nearestDepot(vh.tile, dk) || S.depots.find(d => (d.kind || "road") === dk);
+  const dp = inDepot(vh) || nearestDepot(vh.tile, dk) || S.depots.find(d => (d.kind || "road") === dk && (d.owner || "player") === "player");
   if (!dp) return { ok: false, msg: "Build a depot first." };
   const r = buyVehicle(vh.modelId, dp); if (!r.ok) return r;
   r.vh.orders = OR.cloneOrders(vh.orders, r.vh.id);
@@ -65,9 +65,9 @@ function replacementFor(vh) {
 }
 function renewAtDepot(vh) {
   const rp = replacementFor(vh); if (!rp) return false;
-  const old = modelOf(vh), back = core.vehicleSalePrice(vh.core, old), net = rp.model.price - back;
+  const old = modelOf(vh), back = saleValue(vh), price = vehiclePrice(rp.model), net = price - back;
   if (S.company.cash - net < 10000) { if (!vh.warnNoCash) { vh.warnNoCash = true; EV.addNews(S.news, S.date, "bad", "Not enough money to " + rp.why + " " + old.name + " #" + vh.id.slice(1) + ".", { x: vh.tile.x, y: vh.tile.y }); } return false; }
-  S.company.cash -= rp.model.price; post("newVehicles", -rp.model.price); S.company.cash += back; post("other", back);
+  S.company.cash -= price; post("newVehicles", -price); S.company.cash += back; post("other", back);
   vh.modelId = rp.model.id; vh.cargo = rp.model.cargo; vh.core = core.newVehicle(vh.id, rp.model); vh.core.breakdownsEnabled = S.settings.breakdowns > 0;
   vh.loaded = 0; vh.origin = null; vh.warnOld1 = vh.warnOld2 = vh.warnNoCash = false;
   if (isTrain(vh)) { const L = trainLen(rp.model); vh.trail = vh.trail.slice(0, L); }
