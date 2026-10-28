@@ -238,7 +238,7 @@ function draw() {
       if (rd) drawRoad(ph.x, ph.y, x, y);
       if (rl2) drawTrack(ph.x, ph.y, x, y, rd);
       if (!rd && !rl2 && m.forest[i] && !water) { const a = hash(x, y), b = hash(y, x); drawTree(p.x - 8 + a * 6, p.y + 1, pal.tree, a > 0.5); drawTree(p.x + 7 - b * 5, p.y + 3, shade(pal.tree, 0.9), b > 0.4); if (a > 0.3) drawTree(p.x, p.y - 3 + b * 2, shade(pal.tree, 1.05), true); }
-      const sIdx = R.stationAt.get(i); if (sIdx) drawStation(ph.x, ph.y, sIdx);
+      const sIdx = R.stationAt.get(i); if (sIdx) { drawStation(ph.x, ph.y, sIdx); if (sIdx.x === x && sIdx.y === y) drawCargoPiles(ph.x, ph.y, sIdx); }
       const dIdx = R.depotAt.get(i); if (dIdx) drawDepot(ph.x, ph.y, dIdx);
       const b = R.bld.get(i); if (b) drawBuilding(p.x, p.y, b, x, y);
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
@@ -291,11 +291,7 @@ function spriteFor(modelId) {
 function drawVehicle(v, pos) {
   const img = spriteFor(v.modelId); if (!img) return;
   const k = isTrain(v) ? Math.min(0.3, 66 / img.naturalWidth) : 0.3, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  const facingLeft = v.dir.dx < 0 || v.dir.dy > 0;
-  ctx.save(); ctx.translate(pos.x, pos.y + 2);
-  if (facingLeft) ctx.scale(-1, 1);
-  ctx.drawImage(img, -w / 2, -h * 0.82, w, h);
-  ctx.restore();
+  isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy);
   if (v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(pos.x, pos.y - 20, 4, 0, 7); ctx.fill(); }
   else if (v.loaded > 0 && view.z > 1.2) { ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fillRect(pos.x - 3, pos.y - 20, 6, 3); }
 }
@@ -330,9 +326,7 @@ function trainUnits(v) {
 function drawUnit(v, u) {
   const img = spriteFor(u.id); if (!img) return;
   const k = (u.loco ? 17 : 15) / img.naturalWidth, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  const facingLeft = u.dx < 0 || u.dy > 0;
-  ctx.save(); ctx.translate(u.x, u.y + 2); if (facingLeft) ctx.scale(-1, 1);
-  ctx.drawImage(img, -w / 2, -h * 0.82, w, h); ctx.restore();
+  isoSprite(img, u.x, u.y + 2, w, h, u.dx || u.dy ? u.dx : 1, u.dy || 0);
   if (u.loco && v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(u.x, u.y - 16, 4, 0, 7); ctx.fill(); }
   else if (u.loco && v.red && view.z > 1) { ctx.fillStyle = "rgba(255,60,40,.9)"; ctx.fillRect(u.x - 2, u.y - 18, 4, 4); }
 }

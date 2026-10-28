@@ -58,3 +58,4 @@ body.menu-open #wins{z-index:110}
 .saves{display:flex;flex-direction:column;gap:5px;margin:6px 0}.sv{border:1px solid var(--line);border-radius:3px;background:#efe9c4;padding:6px}.svn{display:flex;flex-direction:column}.svn span{font-size:12px}.sv button{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);background:var(--panel2);border-radius:2px;cursor:pointer;color:var(--ink);min-height:30px}.sv button.armed{background:var(--red);color:#fff;border-color:var(--red)}
 .tool.undo{margin-left:6px;background:var(--panel)}.tool.undo:disabled{opacity:.45}
 input[type=range]{accent-color:var(--olive2)}
+.cg{margin:4px 0}.sv-row{cursor:pointer}.wide-sel{width:100%;margin:2px 0 6px}

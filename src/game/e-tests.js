@@ -424,6 +424,54 @@ const TESTS = [
     const l = w.querySelector("#set-labels"); l.checked = false; l.dispatchEvent(new Event("change", { bubbles: true })); eq(prefs.labels, false, "labels off");
     draw(); Object.assign(prefs, keep); savePrefs(); closeAllWins();
   }],
+  ["fleet", "Stop, start, stop in depot and clone", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "coal", 1); if (r.ok) break; }
+    assert(r && r.ok, "line"); const vh = r.vh; simulateDays(5);
+    toggleStopped(vh); const at = { ...vh.tile }, cash = S.company.cash; simulateDays(10);
+    assert(sameT(vh.tile, at) && vh.state !== "moving", "a stopped vehicle stays put"); assert(S.company.cash >= cash - 1, "and costs nothing to run");
+    toggleStopped(vh); assert(sendToDepot(vh, true).ok, "sent to depot");
+    for (let d = 0; d < 120 && !vh.stopped; d++) simulateDays(1);
+    assert(vh.stopped && R.depotAt.get(key(vh.tile.x, vh.tile.y)), "stopped inside the depot");
+    const n = S.vehicles.length, c = cloneVehicle(vh); assert(c.ok, c.msg); eq(S.vehicles.length, n + 1, "one more vehicle");
+    eq(c.vh.orders.orders.filter(o => o.kind === "stop").map(o => o.stationId).join(), vh.orders.orders.filter(o => o.kind === "stop").map(o => o.stationId).join(), "clone has the same stops");
+  }],
+  ["fleet", "Old vehicles: warnings, autorenew and autoreplace at the depot", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 2); if (r.ok) break; }
+    assert(r && r.ok, "line"); S.company.cash = 900000;
+    const [a, b] = S.vehicles; const life = lifeOf(modelOf(a));
+    a.core.ageDays = Math.round((life - 0.5) * 365); ageWarnings(); assert(S.news.items.some(n => /getting old/.test(n.text)), "getting-old news");
+    a.core.ageDays = Math.round((life + 0.2) * 365); ageWarnings(); assert(S.news.items.some(n => /is old and breaks down/.test(n.text)), "old news");
+    replaceRules().renew = true; sendToDepot(a, false); for (let d = 0; d < 150 && a.core.ageDays > 365; d++) simulateDays(1);
+    assert(a.core.ageDays < 365, "renewed at the depot"); assert(S.news.items.some(n => /^Renewed/.test(n.text)), "renew news");
+    const newer = V.availableModels(S.date.year, "bus").find(m => m.id !== b.modelId); replaceRules().rules[b.modelId] = newer.id;
+    sendToDepot(b, false); for (let d = 0; d < 150 && b.modelId !== newer.id; d++) simulateDays(1);
+    eq(b.modelId, newer.id, "replaced with the newer model");
+    autoreplaceWin(); assert(document.querySelector(".win[data-id=autorep] select"), "autoreplace window"); closeAllWins();
+  }],
+  ["fleet", "Refit a truck and a train in the depot", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "coal", 1); if (r.ok) break; }
+    assert(r && r.ok, "line"); S.company.cash = 900000; const vh = r.vh;
+    assert(!refit(vh, "grain").ok, "only in a depot"); sendToDepot(vh, true); for (let d = 0; d < 120 && !vh.stopped; d++) simulateDays(1);
+    const opts = refitOptions(vh); assert(opts.length >= 4, "can refit to other cargo");
+    const rr = refit(vh, "grain"); assert(rr.ok, rr.reason); eq(vh.cargo, "grain"); assert(/Grain/.test(modelOf(vh).name), "now a grain truck: " + modelOf(vh).name);
+    let t; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); t = demoLine("rail", "coal", 1); if (t.ok) break; }
+    S.company.cash = 900000; const tr = t.vh; sendToDepot(tr, true); for (let d = 0; d < 160 && !tr.stopped; d++) simulateDays(1); assert(tr.stopped, "train in depot");
+    const rt = refit(tr, "wood"); assert(rt.ok, rt.reason); eq(tr.cargo, "wood"); eq(modelOf(tr).parts.n, 5, "same number of wagons");
+  }],
+  ["stations", "Station window lists vehicles and rating reasons; road stops get bays", () => {
+    let r; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = demoLine("road", "passengers", 4); if (r.ok) break; }
+    assert(r && r.ok, "line"); S.company.cash = 900000; simulateDays(40);
+    const st = r.line.s1; stationWin(st); const w = document.querySelector(".win[data-id=st" + st.id + "]");
+    assert(w && w.textContent.includes("Vehicles using it (4)"), "lists the 4 buses"); assert(/picked up|no pickup/.test(w.textContent), "rating reasons"); closeAllWins();
+    let nb = DIR4.map(([dx, dy]) => ({ x: st.x + dx, y: st.y + dy })).find(t => R.roads.hasRoad(t.x, t.y) && !R.stationAt.has(key(t.x, t.y)) && !R.depotAt.has(key(t.x, t.y)));
+    if (!nb) { nb = DIR4.map(([dx, dy]) => ({ x: st.x + dx, y: st.y + dy })).find(t => canBuildRoadOn(t.x, t.y) === ""); if (nb) buildRoadTile(nb.x, nb.y); }
+    assert(nb, "room next to the stop"); const j = placeStation(nb.x, nb.y, "busStop", "player"); assert(j.ok && j.joined, "second bay joined");
+    const [v1, v2, v3] = S.vehicles, A = { x: st.x, y: st.y };
+    for (const v of [v1, v2]) { R.roads.removeVehicle(v.id); v.tile = { ...A }; v.state = "docked"; R.roads.moveVehicle(v.id, null, A); }
+    v3.bay = null; const bay = bayFor(v3, st); assert(sameT(bay, nb), "a full bay sends the next bus to the other one");
+    const trips = S.vehicles.reduce((a, v) => a + (v.trips || 0), 0); simulateDays(120);
+    assert(S.vehicles.reduce((a, v) => a + (v.trips || 0), 0) > trips + 4, "buses keep running with two bays"); draw();
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;

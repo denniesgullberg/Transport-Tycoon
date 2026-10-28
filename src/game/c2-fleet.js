@@ -90,7 +90,9 @@ function ordersEditor(vh, box, onChange) {
 // ------------------------------------------------------------------ fleet list
 function vehStatus(vh) {
   const c = vh.core;
+  if (vh.stopped) return [R.depotAt.get(key(vh.tile.x, vh.tile.y)) ? "Stopped in depot" : "Stopped", "bad"];
   if (vh.broken) return ["Broken down", "bad"];
+  if (vh.red) return ["Waiting at a signal", ""];
   const d = OR.currentOrder(vh.orders);
   if (!vh.orders.orders.length) return ["No orders", "bad"];
   if (vh.state === "docked") { if (d && d.kind === "depot") return ["Being serviced", ""]; const s = d && stationById(d.stationId); return [(d && d.load === "full" ? "Waiting for full load at " : "Loading at ") + (s ? s.name : "stop"), ""]; }
@@ -114,7 +116,7 @@ function fleetWin() {
     function render() {
       const all = playerVehicles(), list = rows();
       const count = t => all.filter(v => t === "all" || (t === "train" ? isTrain(v) : modelOf(v).type === t)).length;
-      let h = "<div class='chips'>" + [["all", "All"], ["bus", "Buses"], ["truck", "Trucks"], ["train", "Trains"]].map(([k, l]) => "<button data-f='" + k + "' class='" + (filter === k ? "on" : "") + "'>" + l + " (" + count(k) + ")</button>").join("") + "<button data-sort='1' class='" + (sort === "profit" ? "on" : "") + "'>Sort by profit</button></div>";
+      let h = "<div class='chips'>" + [["all", "All"], ["bus", "Buses"], ["truck", "Trucks"], ["train", "Trains"]].map(([k, l]) => "<button data-f='" + k + "' class='" + (filter === k ? "on" : "") + "'>" + l + " (" + count(k) + ")</button>").join("") + "<button data-sort='1' class='" + (sort === "profit" ? "on" : "") + "'>Sort by profit</button><button data-ar='1'>Autoreplace</button></div>";
       if (!list.length) h += "<p class='dim'>" + (all.length ? "No vehicles of this kind." : "You have no vehicles yet. Build a depot and tap Buy.") + "</p>";
       h += "<div class='fleet'>" + list.map(v => {
         const m = modelOf(v);
@@ -139,6 +141,7 @@ function fleetWin() {
     body.onclick = e => {
       const f = e.target.closest("[data-f]"); if (f && f.closest(".chips")) { filter = f.dataset.f; render(); return; }
       if (e.target.closest("[data-sort]")) { sort = sort === "profit" ? "id" : "profit"; render(); return; }
+      if (e.target.closest("[data-ar]")) { autoreplaceWin(); return; }
       const sh = e.target.closest("[data-show]"); if (sh) { const v = S.vehicles.find(x => x.id === sh.dataset.show); if (v) centerOn(v.tile.x, v.tile.y); return; }
       const dt = e.target.closest("[data-det]"); if (dt) { const v = S.vehicles.find(x => x.id === dt.dataset.det); if (v) vehicleWin(v); return; }
       const r = e.target.closest("[data-row]"); if (r) { open = open === r.dataset.row ? null : r.dataset.row; render(); }

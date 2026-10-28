@@ -212,17 +212,36 @@ function nearestDepot(t, dk) {
   return best;
 }
 
+// One lane each way: only vehicles heading the same way block each other, and vehicles parked
+// at a stop leave the road free. A stop tile takes two parked vehicles; more wait in line.
+function roadCanEnter(vh, next, target) {
+  const dx = next.x - vh.tile.x, dy = next.y - vh.tile.y;
+  let same = 0, parked = 0;
+  for (const id of R.roads.vehiclesAt(next)) {
+    if (id === vh.id) continue;
+    const o = S.vehicles.find(v => v.id === id); if (!o) continue;
+    if (o.state === "docked") { parked++; continue; }
+    if (o.dir && o.dir.dx === dx && o.dir.dy === dy) same++;
+  }
+  if (same >= 2) return false;
+  if (target && sameT(target, next) && R.stationAt.has(key(next.x, next.y)) && parked >= 2) return false;
+  return true;
+}
 function tryStep(vh) {
+  if (vh.stopped) { if (vh.state !== "docked") vh.state = "idle"; return; }
   if (isTrain(vh)) return trainStep(vh);
   const dest = destTile(vh);
   if (!dest) { vh.state = "idle"; return; }
-  if (vh.tile.x === dest.x && vh.tile.y === dest.y) {
+  let target = dest;
+  if (vh.bayFor !== dest.id) { vh.bay = null; vh.bayFor = dest.id; }
+  if (dest.kind === "stop") { const st = stationById(dest.id); if (st && stationTiles(st).some(t => sameT(t, vh.tile))) { if (OR.arrive(vh.orders, { kind: "stop", id: st.id })) { vh.bay = null; dock(vh, dest); return; } } if (st) target = bayFor(vh, st); }
+  else if (vh.tile.x === dest.x && vh.tile.y === dest.y) {
     if (OR.arrive(vh.orders, { kind: dest.kind, id: dest.id })) { dock(vh, dest); return; }
   }
   const net = netOf(vh);
-  const next = net.nextTile(vh.id, vh.tile, dest);
+  const next = net.nextTile(vh.id, vh.tile, target);
   if (!next) { vh.state = "idle"; vh.wait++; if (vh.wait > 240) { vh.wait = 0; OR.skipOrder(vh.orders); } return; }
-  if (!net.canEnter(vh.id, next)) { vh.state = "idle"; return; }
+  if (!roadCanEnter(vh, next, target)) { vh.state = "idle"; return; }
   if (R.res.has(next.y * S.map.w + next.x)) { vh.state = "idle"; return; }   // barriers down: a train is coming
   net.moveVehicle(vh.id, vh.tile, next);
   vh.from = { x: vh.tile.x, y: vh.tile.y }; vh.to = next; vh.p = 0; vh.state = "moving"; vh.wait = 0;
@@ -232,7 +251,7 @@ function tryStep(vh) {
 function dock(vh, dest) {
   vh.state = "docked"; vh.p = 0; vh.to = vh.tile;
   const m = modelOf(vh);
-  if (dest.kind === "depot") { core.serviceVehicle(vh.core, m); vh.core.daysSinceService = 0; return; }
+  if (dest.kind === "depot") { core.serviceVehicle(vh.core, m); vh.core.daysSinceService = 0; afterDepotVisit(vh); return; }
   const st = stationById(dest.id);
   if (!st) return;
   vh.trips = (vh.trips || 0) + 1;
@@ -259,6 +278,7 @@ function dailyVehicle(vh) {
   const r = core.tickVehicleDay(vh.core, m, () => rng() / Math.max(0.01, S.settings.breakdowns || 1));
   if (r === "broke") { vh.broken = true; if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", m.name + " has broken down.", { x: vh.tile.x, y: vh.tile.y }); sound.play("breakdown"); } }
   else if (r === "ok") vh.broken = false;
+  if (vh.stopped) return;   // stopped vehicles cost nothing to run and do not load
   if (vh.owner === "player") {
     const c = core.vehicleRunningCostPerDay(m, S.inflation);
     S.company.cash -= c; post(isTrainModel(m) ? "runningRail" : "runningRoad", -c); vh.profit.thisYear -= c; vh.profit.lifetime -= c;
@@ -291,7 +311,7 @@ function depotsExist() { return S.depots.length > 0; }
 
 function moveVehicles(dtDays) {
   for (const vh of S.vehicles) {
-    if (vh.broken) continue;
+    if (vh.broken || vh.stopped) continue;
     if (vh.state === "moving") {
       const m = modelOf(vh); if (!m) continue;
       const tilesPerDay = m.speedKmh / 40 * netOf(vh).speedFactor(vh.from, vh.to, tractionOf(vh));
@@ -346,6 +366,7 @@ function metricsNow() {
 }
 
 function monthlyTick() {
+  ageWarnings();
   const m = S.map;
   const before = S.company.cash;
   for (const i of m.industries) core.tickIndustryMonth(i, rng);

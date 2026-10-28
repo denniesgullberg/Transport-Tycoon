@@ -187,20 +187,6 @@ function industryWin(i) {
     body.innerHTML = h;
   });
 }
-function stationWin(s) {
-  ui.overlay = new Set(ST.catchmentTiles(s, S.map.w, S.map.h).map(q => q.y * S.map.w + q.x));
-  const o = openWin("st" + s.id, s.name, (body, o) => {
-    o.refresh = () => {
-      const cs = Object.keys(s.served);
-      let h = "<div class='kv'><span>Type</span><b>" + ({ busStop: "Bus stop", truckStop: "Truck stop", trainStation: "Train station" })[s.kind] + "</b></div>";
-      const c = covered(s); h += "<div class='kv'><span>Covers</span><b>" + c.houses + " buildings" + (c.inds.length ? ", " + c.inds.length + " industr" + (c.inds.length > 1 ? "ies" : "y") : "") + "</b></div>";
-      h += "<table class='tb'><tr><th>Cargo</th><th>Waiting</th><th>Rating</th></tr>" + (cs.length ? cs.map(k => "<tr><td>" + k + "</td><td>" + (s.waiting[k] || 0) + "</td><td>" + Math.round(ST.ratingOf(s, k) * 100) + "%</td></tr>").join("") : "<tr><td colspan=3>No vehicle has served this stop yet.</td></tr>") + "</table>";
-      body.innerHTML = h;
-    };
-    o.refresh();
-  }, { live: 1000 });
-  const w = openWins["st" + s.id]; const x = w.w.querySelector(".wx"); const old = x.onclick; x.onclick = () => { ui.overlay = null; old(); };
-}
 function vehicleWin(vh) {
   const m = modelOf(vh);
   openWin("veh" + vh.id, m.name, (body, o) => {
@@ -209,15 +195,25 @@ function vehicleWin(vh) {
     function renderLive() {
       if (!S.vehicles.includes(vh)) return closeWin("veh" + vh.id);
       const c = vh.core, rel = Math.round(c.reliability * 100);
-      const status = vh.broken ? "Broken down" : core.needsService(c) ? "Needs servicing" : vh.state === "docked" ? "Loading at a stop" : vh.state === "idle" ? "Waiting" : "Running";
-      live.innerHTML = "<div class='kv'><span>Status</span><b>" + status + "</b></div><div class='kv'><span>Cargo</span><b>" + vh.loaded + " / " + m.capacity + " " + vh.cargo + "</b></div><div class='kv'><span>Age</span><b>" + (c.ageDays / 365).toFixed(1) + " years</b></div><div class='kv'><span>Speed</span><b>" + m.speedKmh + " km/h</b></div>" +
+      const status = vehStatus(vh)[0];
+      live.innerHTML = "<div class='kv'><span>Status</span><b>" + status + "</b></div><div class='kv'><span>Cargo</span><b>" + vh.loaded + " / " + m.capacity + " " + vh.cargo + "</b></div><div class='kv'><span>Age</span><b>" + (c.ageDays / 365).toFixed(1) + " of " + lifeOf(m) + " years</b></div><div class='kv'><span>Speed</span><b>" + m.speedKmh + " km/h</b></div>" +
         "<div class='kv'><span>Reliability</span><b>" + rel + "%</b></div><div class='bar'><i style='width:" + rel + "%'></i></div>" +
         "<div class='kv'><span>Profit this year</span><b class='" + (vh.profit.thisYear < 0 ? "neg" : "") + "'>" + money(vh.profit.thisYear) + "</b></div><div class='kv'><span>Profit last year</span><b>" + money(vh.profit.lastYear) + "</b></div><div class='kv'><span>Value</span><b>" + money(core.vehicleSalePrice(c, m)) + "</b></div>";
     }
     function renderOrders() { ordersEditor(vh, ord); }
     o.refresh = renderLive; renderLive(); renderOrders();
     if (vh.owner === "player") {
-      acts.appendChild(btn("Send for service", () => { const dp = nearestDepot(vh.tile, depotKindOf(m)); if (!dp) return toast("Build a depot on the same road or track first.", true); vh.orders.orders.splice(vh.orders.current, 0, { kind: "depot", depotId: dp.id, temp: true }); vh.orders.phase = "travelling"; vh.state = "idle"; renderOrders(); toast("Heading to the depot."); }));
+      const ss = btn(vh.stopped ? "Start" : "Stop", () => { toggleStopped(vh); ss.textContent = vh.stopped ? "Start" : "Stop"; toast(vh.stopped ? "Stopped." : "Started."); });
+      acts.appendChild(ss);
+      acts.appendChild(btn("Service", () => { const r = sendToDepot(vh, false); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + "."); }));
+      acts.appendChild(btn("Stop in depot", () => { const r = sendToDepot(vh, true); if (!r.ok) return toast(r.reason, true); renderOrders(); toast("Heading to " + r.depot.name + " to stop there."); }));
+      acts.appendChild(btn("Clone", () => { const r = cloneVehicle(vh); if (!r.ok) return toast(r.msg, true); toast("Cloned with the same orders."); vehicleWin(r.vh); }));
+      const ro = refitOptions(vh);
+      if (ro.length) {
+        const rf = el("div", "row"); rf.innerHTML = "<select aria-label='Refit to'>" + ro.map(o => "<option value='" + o.cargo + "'>" + (CARGO_NAME[o.cargo] || o.cargo) + "</option>").join("") + "</select>";
+        rf.appendChild(btn("Refit (" + money(refitCost(vh)) + ")", () => { const r = refit(vh, rf.querySelector("select").value); if (!r.ok) return toast(r.reason, true); toast("Refitted to carry " + r.model.cargo + "."); closeWin("veh" + vh.id); vehicleWin(vh); }));
+        body.appendChild(rf);
+      }
       acts.appendChild(btn("Skip order", () => { OR.skipOrder(vh.orders); vh.state = "idle"; renderOrders(); }));
       acts.appendChild(btn("Sell", () => { const v = sellVehicle(vh); toast("Sold for " + money(v) + "."); closeWin("veh" + vh.id); }, "danger"));
     }
