@@ -99,25 +99,39 @@ function drawBuilding(px, py, b, x, y) {
   if (b.kind === "church") { box(px, py - hh, 0.26, 10, "#8a8a92", "#e8e2d2", "#cfc8b6"); }
   if (b.kind === "tower" || b.kind === "apartments") { ctx.fillStyle = "rgba(255,255,255,.35)"; for (let k = 1; k < b.floors + (b.kind === "tower" ? 2 : 0); k++) ctx.fillRect(px - 8, py - k * 6 - 1, 3, 2); }
 }
-const INDCOL = { coalMine: "#3b3f45", powerStation: "#8a8f98", forest: "#7a5a33", sawmill: "#a8824a", farm: "#b3382c", factory: "#9a5a44", steelMill: "#6b3a3a" };
+function chimneys(px, top, n) {
+  for (let k = 0; k < n; k++) { const dx = -12 + k * 12; ctx.fillStyle = "#555"; ctx.fillRect(px + dx - 3, top - 22, 6, 22); ctx.fillStyle = "rgba(235,235,235,.7)"; ctx.beginPath(); ctx.arc(px + dx + 2, top - 28 - ((S.totalDays + k * 7) % 20) * 0.3, 5, 0, 7); ctx.fill(); }
+}
 function drawIndustry(px, py, ind) {
-  const c = INDCOL[ind.kind] || "#888";
-  box(px - TW * 0.5 * 0, py - TH * 0.5, 2.5, 8, shade(c, 1.2), shade(c, 0.85), shade(c, 0.65));
-  const top = py - TH * 0.5 - 8;
-  if (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory") {
-    for (const dx of [-10, 6]) { ctx.fillStyle = "#555"; ctx.fillRect(px + dx - 3, top - 22, 6, 22); ctx.fillStyle = "rgba(235,235,235,.7)"; ctx.beginPath(); ctx.arc(px + dx + 2, top - 28 - (S.totalDays % 20) * 0.3, 5, 0, 7); ctx.fill(); }
-    box(px + 14, top + 6, 0.9, 12, "#aab", "#99a", "#778");
-  } else if (ind.kind === "coalMine") {
-    poly([px - 18, top + 4, px - 4, top - 12, px + 10, top + 4], "#1c1c20");
-    ctx.strokeStyle = "#666"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + 10, top + 2); ctx.lineTo(px + 24, top - 10); ctx.stroke();
-  } else if (ind.kind === "farm") {
-    box(px - 8, top + 4, 1, 12, "#d8cdb8", "#b3382c", "#8a2a20"); box(px + 16, top + 6, 0.5, 20, "#c8c8cc", "#a9a9b0", "#8a8a92");
-  } else if (ind.kind === "forest") {
-    for (let k = 0; k < 4; k++) drawTree(px - 18 + k * 12, top + 8 + (k % 2) * 4, "#2f6b2f", true);
-  } else if (ind.kind === "sawmill") {
-    for (let k = 0; k < 3; k++) { ctx.fillStyle = "#8a5a2b"; ctx.fillRect(px - 16 + k * 11, top + 2, 9, 5); }
+  const [tpl, c] = IND_LOOK[ind.kind] || ["works", "#888"];
+  let top = py - TH * 0.5 - 8, tall = false;
+  if (tpl === "rig") {
+    ctx.fillStyle = "#4a4f57"; for (const [dx, dy] of [[-12, 0], [12, 0], [0, -6], [0, 6]]) ctx.fillRect(px + dx - 1, py + dy - 6, 2, 12);
+    box(px, py - 8, 1.6, 4, "#9aa0a8", "#7a8088", "#5a6068");
+    ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px + 4, py - 14); ctx.lineTo(px + 8, py - 40); ctx.lineTo(px + 12, py - 14); ctx.moveTo(px + 5, py - 22); ctx.lineTo(px + 11, py - 22); ctx.moveTo(px + 6, py - 30); ctx.lineTo(px + 10, py - 30); ctx.stroke();
+    ctx.fillStyle = "#e8e8e8"; ctx.beginPath(); ctx.ellipse(px - 8, py - 16, 6, 3, 0, 0, 7); ctx.fill();
+    top = py - 24; tall = true;
+  } else {
+    box(px, py - TH * 0.5, 2.5, 8, shade(c, 1.2), shade(c, 0.85), shade(c, 0.65));
+    if (tpl === "works") { chimneys(px, top, 2); box(px + 14, top + 6, 0.9, 12, shade(c, 1.35), shade(c, 1.1), shade(c, 0.9)); tall = true; }
+    else if (tpl === "tanks") {
+      for (const [dx, dy] of [[-12, 4], [0, 8], [12, 4]]) { ctx.fillStyle = "#d8dce0"; ctx.beginPath(); ctx.ellipse(px + dx, top + dy - 6, 7, 4, 0, 0, 7); ctx.fill(); ctx.fillStyle = "#b8bcc2"; ctx.fillRect(px + dx - 7, top + dy - 6, 14, 8); ctx.fillStyle = "#e8ecf0"; ctx.beginPath(); ctx.ellipse(px + dx, top + dy - 6, 7, 3, 0, 0, 7); ctx.fill(); }
+      ctx.fillStyle = "#555"; ctx.fillRect(px + 18, top - 26, 3, 26); ctx.fillStyle = "#ff9a2a"; ctx.beginPath(); ctx.arc(px + 19.5, top - 29, 3 + (S.totalDays % 3), 0, 7); ctx.fill(); tall = true;
+    } else if (tpl === "mine") {
+      poly([px - 18, top + 4, px - 4, top - 12, px + 10, top + 4], shade(c, 0.6));
+      ctx.strokeStyle = "#666"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + 10, top + 2); ctx.lineTo(px + 24, top - 10); ctx.stroke();
+      ctx.fillStyle = "#444"; ctx.fillRect(px + 14, top - 18, 3, 20);
+    } else if (tpl === "farm") { box(px - 8, top + 4, 1, 12, "#d8cdb8", c, shade(c, 0.75)); box(px + 16, top + 6, 0.5, 20, "#c8c8cc", "#a9a9b0", "#8a8a92"); }
+    else if (tpl === "orchard") { for (let k = 0; k < 6; k++) { const ox = -18 + (k % 3) * 14, oy = top + 2 + Math.floor(k / 3) * 8; ctx.fillStyle = "#2f6b2f"; ctx.beginPath(); ctx.arc(px + ox, oy, 5, 0, 7); ctx.fill(); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(px + ox + 1, oy - 1, 1.6, 0, 7); ctx.fill(); } }
+    else if (tpl === "forest") { for (let k = 0; k < 4; k++) drawTree(px - 18 + k * 12, top + 8 + (k % 2) * 4, "#2f6b2f", true); }
+    else if (tpl === "sawmill") { for (let k = 0; k < 3; k++) { ctx.fillStyle = "#8a5a2b"; ctx.fillRect(px - 16 + k * 11, top + 2, 9, 5); } }
+    else if (tpl === "wells") {
+      for (const dx of [-12, 8]) { const bob = Math.sin((S.totalDays + dx) * 0.9) * 3; ctx.strokeStyle = shade(c, 1.4); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + dx - 6, top + 6); ctx.lineTo(px + dx, top - 8); ctx.lineTo(px + dx + 6, top + 6); ctx.stroke(); ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px + dx - 9, top - 8 + bob); ctx.lineTo(px + dx + 9, top - 8 - bob); ctx.stroke(); }
+    } else if (tpl === "fountain") {
+      for (const dx of [-10, 10]) { ctx.fillStyle = shade(c, 0.8); ctx.beginPath(); ctx.ellipse(px + dx, top + 6, 7, 3, 0, 0, 7); ctx.fill(); ctx.strokeStyle = shade(c, 1.4); ctx.lineWidth = 1.5; ctx.beginPath(); for (const a of [-0.5, 0, 0.5]) { ctx.moveTo(px + dx, top + 5); ctx.quadraticCurveTo(px + dx + a * 10, top - 16, px + dx + a * 16, top + 4); } ctx.stroke(); }
+    }
   }
-  if (prefs.labels && view.z >= 1.1) label(px, top - (ind.kind === "powerStation" || ind.kind === "steelMill" || ind.kind === "factory" ? 40 : 22), ind.name, 9);
+  if (prefs.labels && view.z >= 1.1) label(px, top - (tall ? 40 : 22), ind.name, 9);
 }
 function label(px, py, text, size, col) {
   ctx.font = "bold " + size + "px Verdana, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(20,30,10,.8)";
@@ -180,8 +194,26 @@ function drawTrack(px, py, x, y, crossing) {
     if (sg.two) { ctx.fillStyle = "#fff"; ctx.fillRect(px + ox - 3, py + oy - 21, 6, 2); }
   }
 }
-function drawStation(px, py, s) {
-  const col = s.owner === "player" ? PLAYER_COLOR : ((S.rivals.find(r => r.ai.id === s.owner) || {}).color || "#888");
+function drawStation(px, py, s, x, y) {
+  const col = s.owner === "player" ? PLAYER_COLOR : s.owner === "public" ? "#777" : ((S.rivals.find(r => r.ai.id === s.owner) || {}).color || "#888");
+  if (s.kind === "dock") {
+    if (s.rigId) return;
+    const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0);
+    ctx.strokeStyle = "#7a5a33"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + d.x * 0.7, py + d.y * 0.7); ctx.stroke();
+    box(px - 4, py, 0.5, 8, "#c9b48a", "#a8916a", "#8a7552");
+    ctx.strokeStyle = "#d6a82e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + 6, py); ctx.lineTo(px + 6, py - 22); ctx.lineTo(px + 6 + d.x * 0.5, py - 22 + d.y * 0.5); ctx.stroke();
+    ctx.fillStyle = col; ctx.fillRect(px - 9, py - 16, 10, 5);
+    return;
+  }
+  if (s.kind === "airport") {
+    diamond(px, py, "#8d9096", 0.98);
+    const big = s.size === "large", n = big ? 3 : 2, cx = x - s.x, cy = y - s.y;
+    if (cy === n - 1) { ctx.strokeStyle = "#f2f2f2"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(px - TW / 4, py - TH / 4); ctx.lineTo(px + TW / 4, py + TH / 4); ctx.stroke(); ctx.setLineDash([]); }
+    if (cx === 0 && cy === 0) { box(px, py, 0.7, 10, "#e6e2d6", "#c9c3ae", "#aaa38c"); ctx.fillStyle = "#3a6fa8"; ctx.fillRect(px - 8, py - 13, 16, 3); }
+    if (cx === n - 1 && cy === 0) { ctx.fillStyle = "#666"; ctx.fillRect(px - 1.5, py - 26, 3, 24); ctx.fillStyle = "#bfe3ff"; ctx.fillRect(px - 5, py - 31, 10, 6); ctx.fillStyle = col; ctx.fillRect(px - 5, py - 33, 10, 2); }
+    if (cx === 0 && cy === n - 1) box(px, py, 0.8, 9, "#b8bcc2", "#9aa0a8", "#7a8088");
+    return;
+  }
   if (s.kind === "trainStation") {
     box(px, py, 0.85, 3, "#c9c3ae", "#aaa38c", "#8f8873");
     ctx.fillStyle = "#333"; ctx.fillRect(px - 10, py - 15, 2, 13); ctx.fillRect(px + 8, py - 15, 2, 13);
@@ -195,6 +227,7 @@ function drawStation(px, py, s) {
   ctx.fillStyle = "#fff"; ctx.font = "bold 7px sans-serif"; ctx.textAlign = "center"; ctx.fillText(s.kind === "busStop" ? "BUS" : "GDS", px, py - 20);
 }
 function drawDepot(px, py, d) {
+  if (d && d.kind === "ship") { box(px, py + 2, 0.8, 9, "#7a5a33", "#8a6a43", "#5a4223"); ctx.fillStyle = "#1c2a3a"; ctx.fillRect(px - 5, py - 4, 10, 6); return; }
   if (d && d.kind === "rail") {
     box(px, py, 0.85, 12, "#4f5d73", "#6b7b94", "#3f4b5d");
     ctx.fillStyle = "#15181f"; ctx.beginPath(); ctx.moveTo(px - 5, py - 1); ctx.lineTo(px - 5, py - 6); ctx.quadraticCurveTo(px, py - 12, px + 5, py - 6); ctx.lineTo(px + 5, py - 1); ctx.fill();
@@ -235,10 +268,10 @@ function draw() {
       const rd = R.roads.hasRoad(x, y), rl = !rd && R.rail.hasRoad(x, y);
       const ph = (rd || rl) && S.spans[i] ? iso(x, y, S.spans[i].h) : p;
       const rl2 = R.rail.hasRoad(x, y);
-      if (rd) drawRoad(ph.x, ph.y, x, y);
+      if (rd) { drawRoad(ph.x, ph.y, x, y); const ow = S.oneway && S.oneway[i]; if (ow) { const d = iso(ow.dx, ow.dy, 0), L = Math.hypot(d.x, d.y), ux = d.x / L, uy = d.y / L; ctx.fillStyle = "#f4f4f4"; ctx.beginPath(); ctx.moveTo(ph.x + ux * 7, ph.y + uy * 7); ctx.lineTo(ph.x - ux * 3 - uy * 4, ph.y - uy * 3 + ux * 4); ctx.lineTo(ph.x - ux * 3 + uy * 4, ph.y - uy * 3 - ux * 4); ctx.fill(); } }
       if (rl2) drawTrack(ph.x, ph.y, x, y, rd);
       if (!rd && !rl2 && m.forest[i] && !water) { const a = hash(x, y), b = hash(y, x); drawTree(p.x - 8 + a * 6, p.y + 1, pal.tree, a > 0.5); drawTree(p.x + 7 - b * 5, p.y + 3, shade(pal.tree, 0.9), b > 0.4); if (a > 0.3) drawTree(p.x, p.y - 3 + b * 2, shade(pal.tree, 1.05), true); }
-      const sIdx = R.stationAt.get(i); if (sIdx) { drawStation(ph.x, ph.y, sIdx); if (sIdx.x === x && sIdx.y === y) drawCargoPiles(ph.x, ph.y, sIdx); }
+      const sIdx = R.stationAt.get(i); if (sIdx) { drawStation(ph.x, ph.y, sIdx, x, y); if (sIdx.x === x && sIdx.y === y && sIdx.kind !== "airport") drawCargoPiles(ph.x, ph.y, sIdx); }
       const dIdx = R.depotAt.get(i); if (dIdx) drawDepot(ph.x, ph.y, dIdx);
       const b = R.bld.get(i); if (b) drawBuilding(p.x, p.y, b, x, y);
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
@@ -274,8 +307,9 @@ function draw() {
 function vehiclePos(v) {
   let gx = v.tile.x, gy = v.tile.y;
   if (v.state === "moving") { gx = v.from.x + (v.to.x - v.from.x) * v.p; gy = v.from.y + (v.to.y - v.from.y) * v.p; }
-  const h0 = tileH(v.from.x, v.from.y), h1 = tileH(v.to.x, v.to.y);
+  const h0 = tileH(Math.round(v.from.x), Math.round(v.from.y)), h1 = tileH(Math.round(v.to.x), Math.round(v.to.y));
   const h = v.state === "moving" ? h0 + (h1 - h0) * v.p : tileH(v.tile.x, v.tile.y);
+  if (isAir(v) && v.state !== "moving" && v.pos) { const p = iso(v.pos.x, v.pos.y, tileH(v.tile.x, v.tile.y)); return { gx: v.pos.x, gy: v.pos.y, x: p.x, y: p.y }; }
   const p = iso(gx, gy, h);
   return { gx, gy, x: p.x, y: p.y };
 }
@@ -290,6 +324,13 @@ function spriteFor(modelId) {
 }
 function drawVehicle(v, pos) {
   const img = spriteFor(v.modelId); if (!img) return;
+  if (isAir(v)) {
+    const alt = v.state === "moving" ? 34 * Math.min(1, Math.sin(Math.PI * v.p) * 2.2) : 0;
+    if (alt > 2) { ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(pos.x, pos.y + 2, 9, 3, 0, 0, 7); ctx.fill(); }
+    const k = 0.24, w = img.naturalWidth * k, h = img.naturalHeight * k;
+    isoSprite(img, pos.x, pos.y + 2 - alt, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy);
+    return;
+  }
   const k = isTrain(v) ? Math.min(0.3, 66 / img.naturalWidth) : 0.3, w = img.naturalWidth * k, h = img.naturalHeight * k;
   isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy);
   if (v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(pos.x, pos.y - 20, 4, 0, 7); ctx.fill(); }

@@ -84,14 +84,16 @@ function refitOptions(vh) {
   const m = modelOf(vh), y = S.date.year;
   if (isTrain(vh)) {
     const w = V.getModel(m.parts.wagonId);
-    return [...new Set(V.availableModels(y, "wagon").map(x => x.cargo))].filter(c => c !== w.cargo).map(c => {
+    return [...new Set(V.availableModels(y, "wagon").map(x => x.cargo))].filter(c => c !== w.cargo && climateCargos().includes(c)).map(c => {
       const pick = V.availableModels(y, "wagon").filter(x => x.cargo === c).sort((a, b) => Math.abs(a.introYear - w.introYear) - Math.abs(b.introYear - w.introYear))[0];
       return { cargo: c, model: V.buildTrainModel(m.parts.locoId, pick.id, m.parts.n) };
     }).filter(o => o.model);
   }
+  const cc = climateCargos();
+  if (m.type === "ship" && m.cargo !== "passengers") return V.availableModels(y, "ship").filter(x => x.cargo !== m.cargo && x.cargo !== "passengers" && cc.includes(x.cargo)).map(x => ({ cargo: x.cargo, model: x }));
   if (m.type !== "truck") return [];
   const mfr = m.name.split(" ")[0];
-  return V.availableModels(y, "truck").filter(x => x.cargo !== m.cargo && x.name.startsWith(mfr + " ")).map(x => ({ cargo: x.cargo, model: x }));
+  return V.availableModels(y, "truck").filter(x => x.cargo !== m.cargo && cc.includes(x.cargo) && x.name.startsWith(mfr + " ")).map(x => ({ cargo: x.cargo, model: x }));
 }
 function refitCost(vh) { return Math.round(modelOf(vh).price * 0.1); }
 function refit(vh, cargo) {
@@ -160,7 +162,7 @@ function stationWin(s) {
     o.refresh = () => {
       if (!S.stations.includes(s)) return closeWin("st" + s.id);
       const cs = Object.keys(s.served), c = covered(s), vs = stationVehicles(s);
-      let h = "<div class='kv'><span>Type</span><b>" + ({ busStop: "Bus stop", truckStop: "Truck stop", trainStation: "Train station" })[s.kind] + " · " + stationTiles(s).length + " tile" + (stationTiles(s).length > 1 ? "s" : "") + "</b></div>";
+      let h = "<div class='kv'><span>Type</span><b>" + ({ busStop: "Bus stop", truckStop: "Truck stop", trainStation: "Train station", dock: "Dock", airport: "Airport" })[s.kind] + " · " + stationTiles(s).length + " tile" + (stationTiles(s).length > 1 ? "s" : "") + "</b></div>";
       h += "<div class='kv'><span>Covers</span><b>" + c.houses + " buildings" + (c.inds.length ? ", " + c.inds.map(i => i.name).join(", ") : "") + "</b></div>";
       h += "<h4>Cargo</h4>" + (cs.length ? cs.map(k => { const r = Math.round(ST.ratingOf(s, k) * 100); return "<div class='cg'><div class='kv'><span>" + k + "</span><b>" + (s.waiting[k] || 0) + " waiting · " + r + "%</b></div><div class='bar'><i style='width:" + r + "%;background:" + (r >= 60 ? "var(--green)" : r >= 40 ? "#c99a1e" : "var(--red)") + "'></i></div><div class='dim small'>" + ratingReasons(s, k) + "</div></div>"; }).join("") : "<p class='dim'>No vehicle has served this stop yet.</p>");
       h += "<h4>Vehicles using it (" + vs.length + ")</h4>" + (vs.length ? vs.slice(0, 12).map(v => "<div class='kv sv-row' data-v='" + v.id + "'><span>#" + v.id.slice(1) + " " + (isTrain(v) ? "Train" : modelOf(v).name) + "</span><b>" + vehStatus(v)[0] + "</b></div>").join("") : "<p class='dim'>None yet.</p>");
@@ -173,7 +175,7 @@ function stationWin(s) {
 }
 
 // Little piles of waiting cargo next to busy stations.
-const PILE_COL = { passengers: "#f2d6a2", mail: "#d33", coal: "#2b2b2e", wood: "#8a5a2b", grain: "#e0c050", goods: "#3f6d9a", steel: "#8a96a3" };
+const PILE_COL = { passengers: "#f2d6a2", mail: "#d33", coal: "#2b2b2e", wood: "#8a5a2b", grain: "#e0c050", goods: "#3f6d9a", steel: "#8a96a3", paper: "#eee8d5", food: "#f5f5f5", gold: "#d4af37", oil: "#1e1e22", rubber: "#6b4a2b", fruit: "#e07b00", water: "#3a7fc2", diamonds: "#bfe3ff", sugar: "#f7c6de", plastic: "#d83aa8", cola: "#5a2a1a", sweets: "#ff7ab8", toys: "#7a4fd0", fizzy: "#2fbf71", batteries: "#f2c230" };
 function drawCargoPiles(px, py, s) {
   if (view.z < 0.9) return;
   let n = 0;

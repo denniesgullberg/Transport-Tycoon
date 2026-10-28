@@ -262,7 +262,7 @@ const TESTS = [
     for (const c of ["coal", "wood", "grain", "goods", "steel", "mail"]) { const v = { road: V.availableModels(1950, "truck").filter(m => m.cargo === c), rail: V.availableModels(1950, "wagon").filter(m => m.cargo === c) }; assert(v.road.length && v.rail.length, c + " needs a truck and a wagon in 1950"); }
     assert(V.availableModels(1950, "wagon").some(m => m.cargo === "passengers") && V.availableModels(1950, "bus").length, "passenger coaches and buses");
     for (const [kind, ch] of Object.entries(core.CHAINS)) {
-      if (ch.out && ch.out !== "goods") assert((CARGO_TO_IND[ch.out] || []).length, kind + " makes " + ch.out + " but nothing accepts it");
+      if (ch.out) assert((CARGO_TO_IND[ch.out] || []).length || core.TOWN_CARGO.includes(ch.out), kind + " makes " + ch.out + " but nothing accepts it");
       for (const c of ch.in || []) assert((CARGO_TO_IND[c] || []).includes(kind), kind + " should accept " + c);
       if (ch.out) eq(CARGO_FROM_IND[kind], ch.out, kind + " output label");
     }
@@ -524,11 +524,82 @@ const TESTS = [
   }],
   ["money", "Cargo payment chart, and vehicle prices follow inflation", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "83" });
-    const svg = cargoRatesSvg(); eq((svg.match(/<polyline/g) || []).length, 7, "seven cargo lines");
+    const svg = cargoRatesSvg(); eq((svg.match(/<polyline/g) || []).length, climateCargos().length, "one line per cargo in this climate");
     let r; for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); r = buildDemoLine("road", "passengers"); if (r.ok) break; }
     S.inflation = 2; const bus = V.availableModels(1950, "bus")[0]; const c0 = S.company.cash; buyVehicle(bus.id, r.depot);
     eq(Math.round(c0 - S.company.cash), bus.price * 2, "price doubled with inflation");
-    graphsWin(); const w = document.querySelector(".win[data-id=graphs]"); w.querySelector("[data-tab=rates]").click(); assert(w.querySelectorAll("polyline").length === 7, "rates tab"); closeAllWins();
+    graphsWin(); const w = document.querySelector(".win[data-id=graphs]"); w.querySelector("[data-tab=rates]").click(); assert(w.querySelectorAll("polyline").length === climateCargos().length, "rates tab"); closeAllWins();
+  }],
+  ["climate", "Each climate has its own industries, cargo and vehicles", () => {
+    const want = { arctic: ["paperMill", "goldMine"], tropical: ["rubberPlantation", "waterSupply"], toyland: ["sugarMine", "toyFactory"] };
+    for (const [cl, kinds] of Object.entries(want)) {
+      let ok = false;
+      for (const seed of ["91", "92", "93"]) {
+        startGame({ climate: cl, difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed });
+        const have = new Set(S.map.industries.map(i => i.kind));
+        if (kinds.every(k => have.has(k))) { ok = true; break; }
+      }
+      assert(ok, cl + " has " + kinds.join(" and "));
+      for (const i of S.map.industries) assert(mapgen.CLIMATE_INDUSTRIES[cl].includes(i.kind), i.kind + " does not belong in " + cl);
+      for (const c of climateCargos()) if (c !== "passengers") { assert(V.availableModels(1960, "truck").some(m => m.cargo === c), "a truck for " + c + " in " + cl); assert(V.availableModels(1960, "wagon").some(m => m.cargo === c), "a wagon for " + c + " in " + cl); }
+      if (cl === "toyland") assert(["Fizzbury", "Gigglewick", "Bubbleton"].some(n => S.map.towns.some(t => t.name === n)) || S.map.towns.some(t => /bury|wick|ton|ham|dale|port|glen|mere|worth|by|ford/.test(t.name)), "silly names in toyland");
+    }
+    const sh = ["Sugar", "Toy", "Fizzy"]; shopWin(null, "truck"); const w = document.querySelector(".win[data-id=shop]"); assert(sh.some(n => w.textContent.includes(n)), "toyland trucks in the shop"); assert(!w.textContent.includes("Coal Truck"), "no coal trucks in toyland"); closeAllWins();
+  }],
+  ["climate", "Arctic and desert towns only grow when food or water arrives", () => {
+    for (const [cl, cargo] of [["arctic", "food"], ["tropical", "water"]]) {
+      startGame({ climate: cl, difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed: "94" });
+      const needy = S.map.towns.filter(t => t.needs === cargo); assert(needy.length >= 3, "some towns need " + cargo);
+      const t = needy[0], b0 = t.buildings.length; t.fundedBuildDaysLeft = 0; S.settings.growth = 5;
+      simulateDays(60); eq(t.buildings.length, b0, cl + " town without " + cargo + " stays the same");
+      t.fedDays = 200; simulateDays(120); assert(t.buildings.length > b0, cl + " town grows once supplied");
+    }
+  }],
+  ["climate", "Arctic chain: timber to the paper mill by truck makes paper", () => {
+    let done = null;
+    for (const seed of ["91", "92", "93", "94", "95", "96"]) { startGame({ climate: "arctic", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed }); const r = demoLine("road", "wood", 2); if (r.ok) { done = r; break; } }
+    assert(done, "timber line in the arctic"); assert(done.line.ends.to.kind === "paperMill", "timber goes to the paper mill"); simulateDays(250);
+    assert((done.line.ends.to.received || {}).wood > 0, "paper mill received timber");
+  }],
+  ["ships", "Oil tanker from an oil rig to a refinery dock", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15", "16", "17", "18", "21", "22", "23", "24", "31", "32"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 14, rivals: 0, startYear: 1960, seed, water: 0.85 }); d = buildDemoShip(); if (d.ok) break; }
+    assert(d && d.ok, d && d.msg); eq(d.vh.cargo, "oil"); assert(isShip(d.vh), "it is a ship");
+    const out = simulateDays(400); assert(out.cargo > 0, "oil delivered by sea: " + JSON.stringify(out)); assert((d.ref.received || {}).oil > 0, "refinery got the oil");
+    for (const v of S.vehicles) assert(S.map.water[key(v.tile.x, v.tile.y)], "ships stay on water"); draw();
+  }],
+  ["air", "Airports and a plane between two towns", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 16, rivals: 0, startYear: 1960, seed }); d = buildDemoAir(); if (d.ok) break; }
+    assert(d && d.ok, d && d.msg); eq(stationTiles(d.a).length, 4, "small airport is 2 x 2");
+    const jet = V.availableModels(1975, "aircraft").find(isJet); S.date.year = 1975; const hangar = S.depots.find(x => x.airport === d.a.id); assert(!buyVehicle(jet.id, hangar).ok, "jets refused at a small airport"); S.date.year = 1960;
+    let flew = false; for (let k = 0; k < 120; k++) { simulateDays(1); if (d.vh.state === "moving") flew = true; }
+    assert(flew, "the plane took off"); assert(S.metrics.passengers > 0 && d.vh.trips >= 2, "passengers flown: " + S.metrics.passengers); draw();
+  }],
+  ["roads", "One-way roads steer traffic; faster vehicles overtake when the way is clear", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "62" });
+    S.company.cash = 500000; const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 2; y < S.map.h - 2 && !a; y++) for (let x = 2; x < S.map.w - 8 && !a; x++) { let ok = true; for (let k = 0; k < 6; k++) if (!free(x + k, y)) ok = false; if (ok) a = { x, y }; }
+    for (let k = 0; k < 6; k++) buildRoadTile(a.x + k, a.y);
+    assert(R.roads.findPath({ x: a.x + 5, y: a.y }, a), "two-way: path back exists");
+    const r = cycleOneWay(a.x + 2, a.y); assert(r.ok && r.oneway.dx === 1, "one-way east");
+    assert(R.roads.findPath(a, { x: a.x + 5, y: a.y }), "can drive east"); assert(!R.roads.findPath({ x: a.x + 5, y: a.y }, a), "cannot drive west against it");
+    cycleOneWay(a.x + 2, a.y); cycleOneWay(a.x + 2, a.y); assert(!S.oneway[key(a.x + 2, a.y)] && R.roads.findPath({ x: a.x + 5, y: a.y }, a), "back to two-way");
+    const slow = makeVehicle("player", "dunmore-minibus", a, []), slow2 = makeVehicle("player", "marlow-regal", a, []), fast = makeVehicle("player", V.availableModels(1950, "truck")[0].id, { x: a.x + 1, y: a.y }, []);
+    const n = { x: a.x + 2, y: a.y }; for (const v of [slow, slow2]) { R.roads.removeVehicle(v.id); v.tile = { ...n }; v.dir = { dx: 1, dy: 0 }; v.state = "moving"; R.roads.moveVehicle(v.id, null, n); }
+    fast.dir = { dx: 1, dy: 0 }; const fm = modelOf(fast), sm = Math.max(modelOf(slow).speedKmh, modelOf(slow2).speedKmh);
+    eq(roadCanEnter(fast, n, null), fm.speedKmh > sm, "overtakes only if faster");
+    const onc = makeVehicle("player", "dunmore-minibus", n, []); onc.dir = { dx: -1, dy: 0 }; onc.state = "moving"; R.roads.moveVehicle(onc.id, null, n);
+    assert(!roadCanEnter(fast, n, null), "no overtaking into oncoming traffic");
+  }],
+  ["maps", "Map options: town name sets, water and huge maps", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "63", names: "swedish" });
+    assert(S.map.towns.some(t => /[åäöÅÄÖ]|by$|sta$|vik$|holm$|berg$/.test(t.name)), "Swedish names: " + S.map.towns.map(t => t.name).join(", "));
+    const wet = () => S.map.water.reduce((a, b) => a + b, 0);
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 8, rivals: 0, startYear: 1950, seed: "64", water: 0.15, rivers: 0 }); const dry = wet();
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 8, rivals: 0, startYear: 1950, seed: "64", water: 0.85, rivers: 4 }); const lots = wet();
+    assert(lots > dry, "more water: " + dry + " vs " + lots);
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 160, towns: 26, rivals: 0, startYear: 1950, seed: "65" }); eq(S.map.w, 160, "huge map"); assert(S.map.towns.length >= 20, "towns on a huge map"); draw();
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
@@ -566,6 +637,8 @@ function testsWin() {
     row.appendChild(btn("Build demo route", () => { const d = buildDemoRoute(); toast(d.ok ? "Built: depot, two bus stops and a road. Open the shop to buy a bus." : d.msg, !d.ok); if (d.ok) centerOn(d.a.x, d.a.y); }));
     const demo = (label, mode, cargo, n) => row.appendChild(btn(label, () => { const d = demoLine(mode, cargo, n); toast(d.ok ? label + ": built the line and bought the vehicle" + (n > 1 ? "s" : "") + ". Tap Inspect and the vehicle to see its orders." : d.msg, !d.ok); }));
     demo("Demo: coal trucks", "road", "coal", 2); demo("Demo: coal train", "rail", "coal", 1); demo("Demo: passenger train", "rail", "passengers", 1); demo("Demo: timber trucks", "road", "wood", 2);
+    row.appendChild(btn("Demo: oil tanker", () => { const d = buildDemoShip(); toast(d.ok ? "Oil tanker from " + d.rig.name + " to " + d.ref.name + "." : d.msg, !d.ok); if (d.ok) centerOn(d.dock.x, d.dock.y); }));
+    row.appendChild(btn("Demo: aircraft", () => { const d = buildDemoAir(); toast(d.ok ? "Airports and a plane between " + d.a.name + " and " + d.b.name + "." : d.msg, !d.ok); if (d.ok) centerOn(d.a.x, d.a.y); }));
     row.appendChild(btn("+£100,000", () => { S.company.cash += 100000; toast("Added £100,000."); }));
     row.appendChild(btn("Skip 1 year", () => { const r = simulateDays(365); toast("Year done. Cash " + (r.cash >= 0 ? "+" : "") + money(r.cash) + ", passengers " + r.pax + ", cargo " + r.cargo + "."); }));
   });

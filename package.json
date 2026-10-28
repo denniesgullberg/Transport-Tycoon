@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node scripts/build.mjs && node scripts/test.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2020 --moduleResolution node src/engine/*.ts"
+    "typecheck": "tsc --noEmit --strict --target es2020 --module esnext --moduleResolution bundler --lib es2020,dom src/engine/*.ts"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

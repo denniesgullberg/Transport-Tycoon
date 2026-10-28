@@ -22,13 +22,30 @@ export interface MapOptions {
   forests: number;        // 0..1, default 0.5
   rivers: number;         // number of rivers, default 2
   industryScale: number;  // 1 = default number of industries
+  climate: Climate;       // decides which industries appear
+  names: NameSet;         // town name style
 }
 
-const DEFAULTS: MapOptions = { size: 126, towns: 24, lakes: 0.5, hills: 0.5, forests: 0.5, rivers: 2, industryScale: 1 };
+export type Climate = "temperate" | "arctic" | "tropical" | "toyland";
+export type NameSet = "english" | "swedish" | "german" | "french" | "silly";
+
+const DEFAULTS: MapOptions = { size: 126, towns: 24, lakes: 0.5, hills: 0.5, forests: 0.5, rivers: 2, industryScale: 1, climate: "temperate", names: "english" };
 
 export type TownSize = "village" | "town" | "city";
 export type BuildingKind = "house" | "shop" | "apartments" | "tower" | "church";
-export type IndustryKind = "coalMine" | "powerStation" | "forest" | "sawmill" | "farm" | "factory" | "steelMill";
+export type IndustryKind = "coalMine" | "powerStation" | "forest" | "sawmill" | "farm" | "factory" | "steelMill"
+  | "oilRig" | "oilWell" | "refinery" | "paperMill" | "printingWorks" | "foodPlant" | "goldMine"
+  | "rubberPlantation" | "fruitPlantation" | "waterSupply" | "diamondMine"
+  | "sugarMine" | "sweetFactory" | "plasticFountain" | "batteryFarm" | "toyFactory" | "colaWells" | "fizzyFactory";
+
+/** Industries that appear in each climate, in the order they are placed. */
+export const CLIMATE_INDUSTRIES: Record<Climate, IndustryKind[]> = {
+  temperate: ["coalMine", "powerStation", "forest", "sawmill", "farm", "factory", "steelMill", "oilRig", "refinery"],
+  arctic:    ["coalMine", "powerStation", "forest", "paperMill", "printingWorks", "farm", "foodPlant", "goldMine", "oilRig", "refinery"],
+  tropical:  ["oilWell", "refinery", "rubberPlantation", "factory", "fruitPlantation", "farm", "foodPlant", "waterSupply", "diamondMine", "oilRig"],
+  toyland:   ["sugarMine", "sweetFactory", "plasticFountain", "batteryFarm", "toyFactory", "colaWells", "fizzyFactory"],
+};
+export const PRIMARY_INDUSTRIES: IndustryKind[] = ["coalMine", "forest", "farm", "oilRig", "oilWell", "goldMine", "rubberPlantation", "fruitPlantation", "waterSupply", "diamondMine", "sugarMine", "plasticFountain", "batteryFarm", "colaWells"];
 
 export interface Building { x: number; y: number; kind: BuildingKind; floors: number }
 
@@ -136,11 +153,37 @@ const BASE_NAMES = [
 const PRE = ["Ash", "Bram", "Cold", "Dun", "Elm", "Fern", "Glen", "Holm", "Iron", "Kirk", "Long", "Marsh", "Nether", "Over", "Quar", "Rush", "Sand", "Thorn", "Upper", "Wyn"];
 const SUF = ["ton", "ham", "bury", "ford", "wick", "stead", "by", "mouth", "field", "dale", "ley", "worth"];
 
-function townNames(n: number, rng: () => number): string[] {
-  const names = [BASE_NAMES[0], ...shuffle(BASE_NAMES.slice(1), rng)];
+const NAME_SETS: Record<NameSet, { base: string[]; pre: string[]; suf: string[] }> = {
+  english: { base: BASE_NAMES, pre: PRE, suf: SUF },
+  swedish: {
+    base: ["Ekdala", "Björkby", "Västerhamn", "Sjövik", "Granbro", "Ljungby", "Hällefors", "Norrbro", "Åkersberg", "Silversjö", "Almhult", "Älvstad", "Bergsta", "Ängsby", "Kungsholm", "Rödbacka", "Klarsjö", "Stenfors", "Östermalm", "Videbäck", "Högby", "Bäckeby", "Söderhamn", "Skogsvik"],
+    pre: ["Ask", "Björk", "Dal", "Ek", "Fors", "Gran", "Hag", "Kvarn", "Lin", "Mal", "Norr", "Ros", "Sand", "Torp", "Ulv", "Vik", "Ål", "Ör"],
+    suf: ["by", "sta", "torp", "berg", "vik", "hult", "köping", "fors", "ås", "näs", "holm", "ryd"],
+  },
+  german: {
+    base: ["Eichenau", "Birkenfeld", "Westhafen", "Seedorf", "Tannbrück", "Heideberg", "Lindenhof", "Nordbrück", "Eschwege", "Silbersee", "Ulmenstadt", "Flussheim", "Bergkamp", "Wiesental", "Königswald", "Rotbach", "Klarwasser", "Steinfeld", "Ostmeer", "Weidental", "Hochtor", "Bachheim", "Südhafen", "Waldhaven"],
+    pre: ["Alt", "Bad", "Burg", "Dorn", "Eich", "Fels", "Grün", "Hoch", "Kirch", "Lauf", "Mühl", "Neu", "Ober", "Rot", "Schön", "Tal", "Unter", "Wald"],
+    suf: ["dorf", "heim", "hausen", "berg", "burg", "feld", "bach", "stadt", "au", "brück", "rode", "ingen"],
+  },
+  french: {
+    base: ["Chênebourg", "Bruyère", "Ouestville", "Lacville", "Pontpins", "Belleforde", "Vertbois", "Pontnord", "Frênes", "Lac-Argent", "Ormeaux", "Rivière", "Haute-Crête", "Prémont", "Boisroi", "Rougerive", "Claireau", "Pierrechamp", "Mer-Est", "Saulaie", "Hautgué", "Ruisseau", "Port-Sud", "Boisport"],
+    pre: ["Beau", "Bel", "Bois", "Champ", "Clair", "Fontaine", "Grand", "Haut", "Mont", "Neuf", "Pont", "Roche", "Saint-", "Val", "Ville"],
+    suf: ["ville", "mont", "bourg", "court", "champ", "fort", "lieu", "val", "pré", "roche", "mer", "sur-Lac"],
+  },
+  silly: {
+    base: ["Fizzbury", "Gigglewick", "Bubbleton", "Jellyfield", "Toffeeford", "Wobblebrook", "Sprinkleby", "Puddingham", "Marshmallow Bay", "Lollipop Hill", "Cupcake Cove", "Noodlestead", "Bouncy Burrow", "Snickerdale", "Ticklemouth", "Gumdrop Glen", "Fudgeworth", "Wigglestone", "Sherbet Sands", "Doodleport", "Jinglewood", "Pickleby", "Muffinmere", "Zigzag"],
+    pre: ["Fizz", "Pop", "Wiggle", "Bubble", "Jelly", "Toffee", "Giggle", "Snooze", "Tickle", "Fudge", "Wobble", "Doodle"],
+    suf: ["bury", "wick", "ton", "ford", "by", "ham", "dale", "mouth", "worth", "port", "glen", "mere"],
+  },
+};
+
+function townNames(n: number, rng: () => number, set: NameSet = "english"): string[] {
+  const ns = NAME_SETS[set] || NAME_SETS.english;
+  const names = [ns.base[0], ...shuffle(ns.base.slice(1), rng)];
   const used = new Set(names);
-  while (names.length < n) {
-    const nm = PRE[Math.floor(rng() * PRE.length)] + SUF[Math.floor(rng() * SUF.length)];
+  let guard = 0;
+  while (names.length < n && guard++ < 5000) {
+    const nm = ns.pre[Math.floor(rng() * ns.pre.length)] + ns.suf[Math.floor(rng() * ns.suf.length)];
     if (!used.has(nm)) { used.add(nm); names.push(nm); }
   }
   return names.slice(0, n);
@@ -207,7 +250,7 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
   };
 
   // 1b. Choose town sites BEFORE water, so lakes and rivers keep clear of them ---
-  const names = townNames(o.towns, rng);
+  const names = townNames(o.towns, rng, o.names);
   const sizes: TownSize[] = [];
   for (let i = 0; i < o.towns; i++) {
     const r = rng();
@@ -364,14 +407,15 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
     return t ? c / t : 0;
   };
 
-  const LABEL: Record<IndustryKind, string> = {
-    coalMine: "Coal Mine", powerStation: "Power Station", forest: "Lumber Camp", sawmill: "Sawmill",
-    farm: "Farm", factory: "Factory", steelMill: "Steel Mill",
-  };
-  const PRIMARY: IndustryKind[] = ["coalMine", "forest", "farm"];
+  const LABEL = INDUSTRY_LABELS;
+  const PRIMARY = PRIMARY_INDUSTRIES;
   const BASE_COUNT: Record<IndustryKind, number> = {
     coalMine: 3, powerStation: 2, forest: 3, sawmill: 2, farm: 4, factory: 2, steelMill: 1,
+    oilRig: 2, oilWell: 3, refinery: 2, paperMill: 2, printingWorks: 2, foodPlant: 2, goldMine: 2,
+    rubberPlantation: 3, fruitPlantation: 3, waterSupply: 3, diamondMine: 2,
+    sugarMine: 3, sweetFactory: 2, plasticFountain: 3, batteryFarm: 3, toyFactory: 2, colaWells: 3, fizzyFactory: 2,
   };
+  const anyNear = (kinds: IndustryKind[], x: number, y: number, max: number) => kinds.some(k => nearestOf(k, x, y) <= max);
 
   type ScoreFn = (x: number, y: number, ctx: { td: number; fd: number; wd: number; h: number }) => number | null;
   const SCORES: Record<IndustryKind, ScoreFn> = {
@@ -391,15 +435,47 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
       if (cm < 15 || cm > 45 || c.td < 6) return null;
       return rng() + (c.wd < 12 ? 1 : 0);
     },
+    oilRig:       () => null,                                    // placed on open water below
+    oilWell:      (_x, _y, c) => c.td < 6 ? null : (c.fd < 0.15 ? 2 : 0) + rng() * 2,
+    refinery:     (_x, _y, c) => c.wd > 8 || c.td < 5 || c.td > 30 ? null : (10 - c.wd) + rng(),
+    paperMill:    (x, y, c) => c.td < 6 || c.td > 30 || !anyNear(["forest"], x, y, 45) ? null : c.fd * 4 + rng() + 2,
+    printingWorks:(_x, _y, c) => c.td < 4 || c.td > 14 ? null : (14 - c.td) * 0.4 + rng(),
+    foodPlant:    (x, y, c) => c.td < 5 || c.td > 22 ? null : (22 - c.td) * 0.2 + (anyNear(["farm", "fruitPlantation"], x, y, 35) ? 2 : 0) + rng(),
+    goldMine:     (_x, _y, c) => c.td < 7 ? null : c.h * 2 + rng() * 2,
+    rubberPlantation: (_x, _y, c) => c.td < 6 ? null : c.fd * 6 + rng() * 2,
+    fruitPlantation:  (_x, _y, c) => c.td < 5 || c.fd > 0.3 ? null : rng() * 3,
+    waterSupply:  (_x, _y, c) => c.td < 6 ? null : (c.wd < 10 ? 3 : 0) + rng(),
+    diamondMine:  (_x, _y, c) => c.td < 7 ? null : c.h * 2 + rng() * 2,
+    sugarMine:    (_x, _y, c) => c.td < 6 ? null : c.h + rng() * 2,
+    sweetFactory: (_x, _y, c) => c.td < 4 || c.td > 18 ? null : (18 - c.td) * 0.3 + rng(),
+    plasticFountain: (_x, _y, c) => c.td < 6 ? null : rng() * 3,
+    batteryFarm:  (_x, _y, c) => c.td < 6 || c.fd > 0.3 ? null : rng() * 3,
+    toyFactory:   (_x, _y, c) => c.td < 4 || c.td > 18 ? null : (18 - c.td) * 0.3 + rng(),
+    colaWells:    (_x, _y, c) => c.td < 6 ? null : rng() * 3,
+    fizzyFactory: (_x, _y, c) => c.td < 4 || c.td > 18 ? null : (18 - c.td) * 0.3 + rng(),
   };
 
-  const kinds: IndustryKind[] = ["coalMine", "powerStation", "forest", "sawmill", "farm", "factory", "steelMill"];
+  const kinds: IndustryKind[] = CLIMATE_INDUSTRIES[o.climate] || CLIMATE_INDUSTRIES.temperate;
   const nameCount = new Map<string, number>();
   for (const kind of kinds) {
     const count = Math.max(1, Math.round(BASE_COUNT[kind] * o.industryScale));
     for (let n = 0; n < count; n++) {
       if (kind === "steelMill" && !industries.some(i => i.kind === "coalMine")) break;
       let best: { x: number; y: number } | null = null, bestScore = -Infinity;
+      if (kind === "oilRig") {
+        // open water: the whole 7 x 7 square around the rig must be water, away from other rigs
+        for (let t = 0; t < 600; t++) {
+          const x = 4 + Math.floor(rng() * (W - 8)), y = 4 + Math.floor(rng() * (H - 8));
+          let ok = true;
+          for (let yy = y - 3; yy <= y + 3 && ok; yy++) for (let xx = x - 3; xx <= x + 3; xx++) if (!inB(xx, yy) || !water[at(xx, yy)]) { ok = false; break; }
+          if (!ok || industries.some(i => Math.hypot(i.x - x, i.y - y) < 10)) continue;
+          best = { x, y }; break;
+        }
+        if (!best) continue;
+        const nt = nearestTown(best.x, best.y), base = nt.i >= 0 ? names[nt.i] : "Valley";
+        industries.push({ id: `ind-${industries.length + 1}`, name: `${base} Oil Rig`, kind, x: best.x, y: best.y, footprint: 1, productionPerMonth: 40 + Math.floor(rng() * 41), input: {}, output: {} });
+        continue;
+      }
       for (let t = 0; t < 400; t++) {
         const x = 4 + Math.floor(rng() * (W - 8));
         const y = 4 + Math.floor(rng() * (H - 8));
@@ -444,6 +520,12 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
     for (let y = ind.y - 1; y <= ind.y + 1; y++) for (let x = ind.x - 1; x <= ind.x + 1; x++) {
       occupied[at(x, y)] = 1; forest[at(x, y)] = 0;
     }
+  }
+  // Desert and snow: in the tropics the dry half of the towns need water, in the north the
+  // higher half need food, before they will grow.
+  if (o.climate === "tropical" || o.climate === "arctic") {
+    const order = towns.slice().sort((a, b) => o.climate === "arctic" ? b.baseHeight - a.baseHeight : waterDist[at(b.x, b.y)] - waterDist[at(a.x, a.y)]);
+    order.slice(0, Math.floor(towns.length / 2)).forEach(t => { (t as TownSite & { needs?: string }).needs = o.climate === "arctic" ? "food" : "water"; });
   }
 
   return { seed, w: W, h: H, height, water, forest, occupied, towns, industries };
@@ -571,7 +653,11 @@ function layoutTown(
 
 // ------------------------------------------------------------ new industries
 
-const INDUSTRY_LABELS: Record<IndustryKind, string> = {
+export const INDUSTRY_LABELS: Record<IndustryKind, string> = {
+  oilRig: "Oil Rig", oilWell: "Oil Wells", refinery: "Oil Refinery", paperMill: "Paper Mill", printingWorks: "Printing Works",
+  foodPlant: "Food Processing Plant", goldMine: "Gold Mine", rubberPlantation: "Rubber Plantation", fruitPlantation: "Fruit Plantation",
+  waterSupply: "Water Supply", diamondMine: "Diamond Mine", sugarMine: "Sugar Mine", sweetFactory: "Sweet Factory",
+  plasticFountain: "Plastic Fountains", batteryFarm: "Battery Farm", toyFactory: "Toy Factory", colaWells: "Cola Wells", fizzyFactory: "Fizzy Drink Factory",
   coalMine: "Coal Mine", powerStation: "Power Station", forest: "Lumber Camp", sawmill: "Sawmill",
   farm: "Farm", factory: "Factory", steelMill: "Steel Mill",
 };
@@ -586,7 +672,8 @@ export function addIndustry(
 ): IndustrySite | null {
   const W = map.w, H = map.h;
   const at = (x: number, y: number) => y * W + x;
-  const primary = kind === "coalMine" || kind === "forest" || kind === "farm";
+  const primary = PRIMARY_INDUSTRIES.includes(kind);
+  if (kind === "oilRig") return null;   // rigs are only placed when the map is made
 
   for (let t = 0; t < 600; t++) {
     const x = 4 + Math.floor(rng() * (W - 8));
@@ -689,12 +776,30 @@ export function toEndpoints(map: MapData): MapEndpoint[] {
     forest:       { produces: "wood",  accepts: [] },
     sawmill:      { produces: "goods", accepts: ["wood"] },
     farm:         { produces: "grain", accepts: [] },
-    factory:      { produces: "goods", accepts: ["grain"] },
+    factory:      { produces: "goods", accepts: ["grain", "steel", "rubber"] },
     steelMill:    { produces: "steel", accepts: ["coal"] },
+    oilRig:       { produces: "oil", accepts: [] },
+    oilWell:      { produces: "oil", accepts: [] },
+    refinery:     { produces: "goods", accepts: ["oil"] },
+    paperMill:    { produces: "paper", accepts: ["wood"] },
+    printingWorks:{ produces: "goods", accepts: ["paper"] },
+    foodPlant:    { produces: "food", accepts: ["grain", "fruit"] },
+    goldMine:     { produces: "gold", accepts: [] },
+    rubberPlantation: { produces: "rubber", accepts: [] },
+    fruitPlantation:  { produces: "fruit", accepts: [] },
+    waterSupply:  { produces: "water", accepts: [] },
+    diamondMine:  { produces: "diamonds", accepts: [] },
+    sugarMine:    { produces: "sugar", accepts: [] },
+    sweetFactory: { produces: "sweets", accepts: ["sugar"] },
+    plasticFountain: { produces: "plastic", accepts: [] },
+    batteryFarm:  { produces: "batteries", accepts: [] },
+    toyFactory:   { produces: "toys", accepts: ["plastic", "batteries"] },
+    colaWells:    { produces: "cola", accepts: [] },
+    fizzyFactory: { produces: "fizzy", accepts: ["cola"] },
   };
   for (const i of map.industries) {
     const s = spec[i.kind];
-    const primary = i.kind === "coalMine" || i.kind === "forest" || i.kind === "farm";
+    const primary = PRIMARY_INDUSTRIES.includes(i.kind) && i.kind !== "oilRig";   // road rivals cannot reach rigs
     out.push({
       id: i.id, name: i.name, x: i.x, y: i.y,
       produces: s.produces, monthlyUnits: primary ? i.productionPerMonth : 0, accepts: s.accepts,

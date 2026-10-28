@@ -55,6 +55,8 @@ export class RoadNetwork {
   private heightAt?: (x: number, y: number) => number;
   /** How many vehicles fit on one road tile before the next one has to wait. */
   laneCapacity: number;
+  /** Optional rule for one-way roads: return false to forbid stepping from a to b. */
+  stepOk?: (a: Pt, b: Pt) => boolean;
 
   constructor(heightAt?: (x: number, y: number) => number, laneCapacity = 2) {
     this.heightAt = heightAt;
@@ -73,6 +75,9 @@ export class RoadNetwork {
   }
 
   hasRoad(x: number, y: number): boolean { return this.roads.has(num(x, y)); }
+
+  /** Call after changing stepOk rules so cached routes are recalculated. */
+  invalidate(): void { this.version++; }
 
   /** All road tiles, e.g. for saving the game. */
   tiles(): Pt[] { return Array.from(this.roads, pt); }
@@ -148,6 +153,7 @@ export class RoadNetwork {
       for (const [dx, dy] of DIRS) {
         const nn = num(p.x + dx, p.y + dy);
         if (!this.roads.has(nn)) continue;
+        if (this.stepOk && !this.stepOk(p, pt(nn))) continue;
         const ng = g.get(cur)! + this.stepCost(cur, nn);
         if (ng < (g.get(nn) ?? Infinity)) {
           g.set(nn, ng); prev.set(nn, cur);

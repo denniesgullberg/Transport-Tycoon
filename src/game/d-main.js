@@ -19,7 +19,7 @@ function afterStart() {
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 
-const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new" };
+const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
 function showMenu(first) {
   ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
@@ -33,7 +33,10 @@ function showMenu(first) {
   else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
     "<label>Difficulty</label><div class='chips'>" + opt("difficulty", "easy", "Easy") + opt("difficulty", "medium", "Medium") + opt("difficulty", "hard", "Hard") + "</div>" +
-    "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + "</div>" +
+    "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + opt("size", 160, "Huge") + "</div>" +
+    "<label>Water</label><div class='chips'>" + opt("water", "d", "Dry") + opt("water", "n", "Normal") + opt("water", "w", "Lots of lakes") + "</div>" +
+    "<label>Rivers</label><div class='chips'>" + opt("rivers", 0, "None") + opt("rivers", 2, "Some") + opt("rivers", 4, "Many") + "</div>" +
+    "<label>Town names</label><div class='chips'>" + opt("names", "auto", "Match climate") + opt("names", "english", "English") + opt("names", "swedish", "Swedish") + opt("names", "german", "German") + opt("names", "french", "French") + opt("names", "silly", "Silly") + "</div>" +
     "<label>Towns</label><div class='chips'>" + opt("towns", 10, "Few") + opt("towns", 18, "Normal") + opt("towns", 26, "Many") + "</div>" +
     "<label>Rival companies</label><div class='chips'>" + [0, 1, 2, 3].map(n => opt("rivals", n, n)).join("") + "</div>" +
     "<label>Start year</label><div class='chips'>" + [1950, 1970, 1990].map(n => opt("year", n, n)).join("") + "</div>" +
@@ -51,7 +54,7 @@ function showMenu(first) {
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire });
+      startGame({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
@@ -204,6 +207,52 @@ function demoLine(mode, cargo, count, minDist) {
   const l = buildDemoLine(mode, cargo, minDist); if (!l.ok) return l;
   const b = demoBuy(l, count); if (!b.ok) return { ok: false, msg: b.msg };
   centerOn(l.s1.x, l.s1.y); return { ok: true, line: l, vh: b.vh };
+}
+// Ships: oil from a rig to a refinery by tanker.
+function buildDemoShip() {
+  const m = S.map;
+  for (const rig of m.industries.filter(i => i.kind === "oilRig")) {
+    const rd = S.stations.find(s => s.rigId === rig.id); if (!rd) continue;
+    for (const ref of m.industries.filter(i => i.kind === "refinery")) {
+      let dockAt = null;
+      for (let dy = -3; dy <= 3 && !dockAt; dy++) for (let dx = -3; dx <= 3 && !dockAt; dx++) {
+        const x = ref.x + dx, y = ref.y + dy; if (!inB(x, y)) continue; const i = key(x, y);
+        if (m.water[i] || m.occupied[i] || R.roads.hasRoad(x, y) || R.rail.hasRoad(x, y)) continue;
+        const w = waterNeighbour(x, y); if (w && R.sea.connected(w, rd.water)) dockAt = { x, y };
+      }
+      if (!dockAt) continue;
+      S.company.cash += 150000;
+      const d = placeDock(dockAt.x, dockAt.y); if (!d.ok) continue;
+      let yard = null;
+      for (let r = 1; r <= 6 && !yard; r++) for (let dy = -r; dy <= r && !yard; dy++) for (let dx = -r; dx <= r && !yard; dx++) { const x = d.station.water.x + dx, y = d.station.water.y + dy; if (inB(x, y) && m.water[key(x, y)] && !m.occupied[key(x, y)] && landNeighbour(x, y) && !sameT({ x, y }, d.station.water) && R.sea.connected({ x, y }, rd.water)) yard = { x, y }; }
+      if (!yard) continue;
+      const sy = placeShipyard(yard.x, yard.y); if (!sy.ok) continue;
+      const tanker = V.availableModels(S.date.year, "ship").filter(x => x.cargo === "oil").sort((a, b) => a.price - b.price)[0];
+      const r = buyVehicle(tanker.id, sy.depot); if (!r.ok) return { ok: false, msg: r.msg };
+      if (!r.vh.orders.orders.length) { addStopTo(r.vh, rd.id); addStopTo(r.vh, d.station.id); }
+      r.vh.orders.orders[0].load = "full";
+      return { ok: true, vh: r.vh, rig, ref, dock: d.station, rigDock: rd };
+    }
+  }
+  return { ok: false, msg: "No oil rig with a reachable refinery on this map." };
+}
+// Aircraft: a small airport by each of two towns and a propeller plane between them.
+function buildDemoAir() {
+  const m = S.map, ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8);
+  const spot = (t) => { for (let r = 2; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = t.x + dx, y = t.y + dy; let ok = true, h = null; for (let a = 0; a < 2 && ok; a++) for (let b = 0; b < 2 && ok; b++) { const i = key(x + b, y + a); if (!inB(x + b, y + a) || m.water[i] || m.occupied[i] || R.roads.hasRoad(x + b, y + a) || R.rail.hasRoad(x + b, y + a)) ok = false; else if (h === null) h = m.height[i]; else if (m.height[i] !== h) ok = false; } if (ok) return { x, y }; } return null; };
+  for (const a of ts) for (const b of ts) {
+    if (a === b || Math.hypot(a.x - b.x, a.y - b.y) < 20) continue;
+    const sa = spot(a), sb = spot(b); if (!sa || !sb) continue;
+    S.company.cash += 150000;
+    const A = placeAirport(sa.x, sa.y, "small"), B = placeAirport(sb.x, sb.y, "small"); if (!A.ok || !B.ok) continue;
+    const plane = V.availableModels(Math.max(S.date.year, 1955), "aircraft").filter(x => x.cargo === "passengers" && !isJet(x)).sort((p, q) => p.price - q.price)[0];
+    if (!plane || plane.introYear > S.date.year) return { ok: false, msg: "No aircraft yet in " + S.date.year + "." };
+    const hangar = S.depots.find(d => d.airport === A.station.id);
+    const r = buyVehicle(plane.id, hangar); if (!r.ok) return { ok: false, msg: r.msg };
+    if (!r.vh.orders.orders.length) { addStopTo(r.vh, A.station.id); addStopTo(r.vh, B.station.id); }
+    return { ok: true, vh: r.vh, a: A.station, b: B.station };
+  }
+  return { ok: false, msg: "No room for two airports on this map." };
 }
 function simulateDays(n) {
   const before = { cash: S.company.cash, pax: S.metrics.passengers, cargo: S.metrics.cargo };

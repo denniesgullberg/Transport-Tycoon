@@ -11,14 +11,17 @@
  */
 
 export type VehicleType = "bus" | "truck" | "locomotive" | "wagon" | "train" | "ship" | "aircraft";
-export type CargoKey = "passengers" | "mail" | "coal" | "goods" | "wood" | "steel" | "grain";
+export type CargoKey = "passengers" | "mail" | "coal" | "goods" | "wood" | "steel" | "grain"
+  | "paper" | "food" | "gold" | "oil" | "rubber" | "fruit" | "water" | "diamonds"
+  | "sugar" | "plastic" | "cola" | "sweets" | "toys" | "fizzy" | "batteries";
 
 export type Shape =
   | "minibus" | "bus" | "doubledecker" | "artic" | "coach"
   | "tipper" | "vanTruck" | "flatLogs" | "flatCoils" | "hopperTruck"
   | "steam" | "diesel" | "electric" | "fast"
   | "paxCar" | "mailVan" | "openHopper" | "boxVan" | "logWagon" | "grainHopper" | "coilWagon"
-  | "ferry" | "cargoShip" | "propPlane" | "jet";
+  | "ferry" | "cargoShip" | "propPlane" | "jet"
+  | "tankTruck" | "tankWagon" | "tanker" | "bulkShip";
 
 export interface Look { shape: Shape; body: string; accent: string; roof: string; trim: string }
 
@@ -46,6 +49,9 @@ export interface VehicleModel {
 const CARGO_LABEL: Record<CargoKey, string> = {
   passengers: "passengers", mail: "bags of mail", coal: "tonnes of coal", goods: "crates of goods",
   wood: "tonnes of wood", steel: "tonnes of steel", grain: "tonnes of grain",
+  paper: "tonnes of paper", food: "tonnes of food", gold: "bags of gold", oil: "kilolitres of oil", rubber: "kilolitres of rubber",
+  fruit: "tonnes of fruit", water: "kilolitres of water", diamonds: "bags of diamonds", sugar: "tonnes of sugar", plastic: "kilolitres of plastic",
+  cola: "kilolitres of cola", sweets: "bags of sweets", toys: "crates of toys", fizzy: "crates of fizzy drinks", batteries: "crates of batteries",
 };
 export const cargoUnitLabel = (c: CargoKey) => CARGO_LABEL[c];
 
@@ -99,6 +105,21 @@ const TRUCK_FAMILIES: TruckFamily[] = [
   { cargo: "wood",  label: "Timber Truck", shape: "flatLogs",    color: "#3f7d3a", caps: [22, 26, 30], offset: 0, extra: 0 },
   { cargo: "steel", label: "Steel Truck",  shape: "flatCoils",   color: "#6b7785", caps: [18, 22, 26], offset: 0, extra: 300 },
   { cargo: "mail",  label: "Mail Van",     shape: "vanTruck",    color: "#c0392b", caps: [22, 26, 30], offset: 0, extra: 0 },
+  { cargo: "oil",   label: "Oil Tanker",   shape: "tankTruck",   color: "#2b2b2e", caps: [21, 25, 29], offset: 0, extra: 200 },
+  { cargo: "paper", label: "Paper Truck",  shape: "vanTruck",    color: "#e8e2cf", caps: [15, 18, 22], offset: 0, extra: 100 },
+  { cargo: "food",  label: "Food Van",     shape: "vanTruck",    color: "#f2f2f2", caps: [17, 20, 24], offset: 0, extra: 200 },
+  { cargo: "gold",  label: "Armoured Truck", shape: "vanTruck",  color: "#8a7a3a", caps: [6, 8, 10],   offset: 0, extra: 900 },
+  { cargo: "rubber",label: "Rubber Tanker", shape: "tankTruck",  color: "#6b4a2b", caps: [20, 24, 28], offset: 0, extra: 100 },
+  { cargo: "fruit", label: "Fruit Truck",  shape: "hopperTruck", color: "#e07b00", caps: [17, 20, 24], offset: 0, extra: 100 },
+  { cargo: "water", label: "Water Tanker", shape: "tankTruck",   color: "#3a7fc2", caps: [21, 25, 29], offset: 0, extra: 100 },
+  { cargo: "diamonds", label: "Diamond Van", shape: "vanTruck",  color: "#9fb7c9", caps: [6, 8, 10],   offset: 0, extra: 900 },
+  { cargo: "sugar", label: "Sugar Truck",  shape: "hopperTruck", color: "#f3d6e6", caps: [20, 24, 28], offset: 0, extra: 0 },
+  { cargo: "plastic", label: "Plastic Tanker", shape: "tankTruck", color: "#d83aa8", caps: [20, 24, 28], offset: 0, extra: 0 },
+  { cargo: "cola",  label: "Cola Tanker",  shape: "tankTruck",   color: "#5a2a1a", caps: [21, 25, 29], offset: 0, extra: 0 },
+  { cargo: "sweets", label: "Sweet Van",   shape: "vanTruck",    color: "#ff7ab8", caps: [15, 18, 22], offset: 0, extra: 0 },
+  { cargo: "toys",  label: "Toy Van",      shape: "vanTruck",    color: "#7a4fd0", caps: [15, 18, 22], offset: 0, extra: 0 },
+  { cargo: "fizzy", label: "Fizzy Drinks Truck", shape: "vanTruck", color: "#2fbf71", caps: [15, 18, 22], offset: 0, extra: 0 },
+  { cargo: "batteries", label: "Battery Truck", shape: "vanTruck", color: "#f2c230", caps: [15, 18, 22], offset: 0, extra: 0 },
 ];
 
 const TRUCKS: Spec[] = TRUCK_FAMILIES.flatMap(f =>
@@ -143,6 +164,21 @@ const WAGON_FAMILIES: WagonFamily[] = [
   { cargo: "wood",       names: ["Timber Wagon", "Log Bogie Wagon", "Timber Carrier"],       shape: "logWagon", colors: ["#6b5a3a", "#4a6b3a", "#3a5a45"], caps: [20, 26, 32], tons: [26, 34, 42] },
   { cargo: "grain",      names: ["Grain Wagon", "Grain Hopper", "Cereal Silo Wagon"],        shape: "grainHopper", colors: ["#b59a4a", "#c9a93a", "#e0c050"], caps: [20, 26, 32], tons: [26, 34, 42] },
   { cargo: "steel",      names: ["Steel Plate Wagon", "Coil Wagon", "Heavy Steel Carrier"],  shape: "coilWagon", colors: ["#5a6470", "#4a5563", "#3b4452"], caps: [20, 26, 32], tons: [30, 38, 46] },
+  { cargo: "oil",      names: ["Oil Tank Wagon", "Bogie Oil Tanker", "Petroleum Tanker"], shape: "tankWagon", colors: ["#2b2b2e", "#3a3a40", "#1e1e22"], caps: [21, 28, 34], tons: [12, 15, 17] },
+  { cargo: "paper",    names: ["Paper Van", "Paper Bogie Van", "Paper Container Wagon"], shape: "boxVan", colors: ["#d9d2b8", "#e8e2cf", "#cfc6a8"], caps: [15, 20, 26], tons: [11, 13, 15] },
+  { cargo: "food",     names: ["Refrigerated Van", "Food Bogie Van", "Reefer Container Wagon"], shape: "boxVan", colors: ["#f2f2f2", "#e6eef5", "#ffffff"], caps: [15, 20, 26], tons: [12, 14, 16] },
+  { cargo: "gold",     names: ["Armoured Van", "Bullion Van", "Secure Container Wagon"], shape: "boxVan", colors: ["#8a7a3a", "#7a6a2a", "#6a5a1a"], caps: [8, 10, 12], tons: [12, 14, 16] },
+  { cargo: "rubber",   names: ["Rubber Tank Wagon", "Latex Tanker", "Rubber Bogie Tanker"], shape: "tankWagon", colors: ["#6b4a2b", "#5a3a20", "#7a5a3a"], caps: [20, 26, 32], tons: [12, 15, 17] },
+  { cargo: "fruit",    names: ["Fruit Van", "Fruit Bogie Van", "Fruit Container Wagon"], shape: "grainHopper", colors: ["#e07b00", "#f09a20", "#d06a00"], caps: [18, 24, 30], tons: [11, 13, 15] },
+  { cargo: "water",    names: ["Water Tank Wagon", "Bogie Water Tanker", "Water Carrier"], shape: "tankWagon", colors: ["#3a7fc2", "#2f6db5", "#4a8fd2"], caps: [21, 28, 34], tons: [12, 15, 17] },
+  { cargo: "diamonds", names: ["Diamond Van", "Gem Van", "Secure Gem Wagon"], shape: "boxVan", colors: ["#9fb7c9", "#8fa7b9", "#afc7d9"], caps: [8, 10, 12], tons: [12, 14, 16] },
+  { cargo: "sugar",    names: ["Sugar Hopper", "Candy Hopper", "Sugar Bogie Hopper"], shape: "grainHopper", colors: ["#f3d6e6", "#f7c6de", "#efb6d6"], caps: [20, 26, 32], tons: [11, 13, 15] },
+  { cargo: "plastic",  names: ["Plastic Tanker", "Bogie Plastic Tanker", "Plastic Carrier"], shape: "tankWagon", colors: ["#d83aa8", "#c82a98", "#e84ab8"], caps: [20, 26, 32], tons: [12, 15, 17] },
+  { cargo: "cola",     names: ["Cola Tanker", "Bogie Cola Tanker", "Cola Carrier"], shape: "tankWagon", colors: ["#5a2a1a", "#4a1a0a", "#6a3a2a"], caps: [21, 28, 34], tons: [12, 15, 17] },
+  { cargo: "sweets",   names: ["Sweet Van", "Candy Van", "Sweet Container Wagon"], shape: "boxVan", colors: ["#ff7ab8", "#ff5aa8", "#ff9ac8"], caps: [15, 20, 26], tons: [11, 13, 15] },
+  { cargo: "toys",     names: ["Toy Van", "Toy Bogie Van", "Toy Container Wagon"], shape: "boxVan", colors: ["#7a4fd0", "#6a3fc0", "#8a5fe0"], caps: [15, 20, 26], tons: [11, 13, 15] },
+  { cargo: "fizzy",    names: ["Fizzy Drinks Van", "Fizzy Bogie Van", "Fizzy Container Wagon"], shape: "boxVan", colors: ["#2fbf71", "#1faf61", "#3fcf81"], caps: [15, 20, 26], tons: [11, 13, 15] },
+  { cargo: "batteries", names: ["Battery Van", "Battery Bogie Van", "Battery Container Wagon"], shape: "boxVan", colors: ["#f2c230", "#e2b220", "#ffd240"], caps: [15, 20, 26], tons: [11, 13, 15] },
 ];
 const WAGONS: Spec[] = WAGON_FAMILIES.flatMap(f =>
   WAGON_GENS.map((g, i): Spec => ({
@@ -155,13 +191,17 @@ const WAGONS: Spec[] = WAGON_FAMILIES.flatMap(f =>
 // ------------------------------------------------------- ships and aircraft
 
 const OTHER: Spec[] = [
-  { name: "Tern Ferry",         type: "ship", cargo: "passengers", year: 1950, speed: 28,  cap: 60,  price: 18000, run: 1500, rel: 0.78, look: L("ferry", "#f2f2f2", "#1e5aa8", "#c9c9c9"), supported: false },
-  { name: "Cormorant Freighter",type: "ship", cargo: "goods",      year: 1955, speed: 24,  cap: 90,  price: 22000, run: 1800, rel: 0.76, look: L("cargoShip", "#3a4a5c", "#b3382c", "#26323f"), supported: false },
-  { name: "Gannet Hydrofoil",   type: "ship", cargo: "passengers", year: 1985, speed: 70,  cap: 90,  price: 36000, run: 2600, rel: 0.86, look: L("ferry", "#e8f1fa", "#d62828", "#b7c6d6"), supported: false },
-  { name: "Sparrow Prop",       type: "aircraft", cargo: "passengers", year: 1955, speed: 240,  cap: 20,  price: 30000, run: 2200, rel: 0.74, look: L("propPlane", "#d9d9d9", "#b3382c", "#a8a8a8"), supported: false },
-  { name: "Heron Airliner",     type: "aircraft", cargo: "passengers", year: 1970, speed: 600,  cap: 70,  price: 80000, run: 4200, rel: 0.82, look: L("jet", "#f4f4f4", "#1e5aa8", "#c8c8c8"), supported: false },
-  { name: "Osprey Freight Jet", type: "aircraft", cargo: "goods",      year: 1982, speed: 700,  cap: 60,  price: 95000, run: 4800, rel: 0.85, look: L("jet", "#d89a2b", "#2b2b2b", "#a87a1f"), supported: false },
-  { name: "Albatross Jumbo",    type: "aircraft", cargo: "passengers", year: 1995, speed: 900,  cap: 180, price: 160000, run: 7200, rel: 0.90, look: L("jet", "#ffffff", "#0b6e4f", "#d0d0d0"), supported: false },
+  { name: "Tern Ferry",         type: "ship", cargo: "passengers", year: 1950, speed: 28,  cap: 60,  price: 18000, run: 1500, rel: 0.78, look: L("ferry", "#f2f2f2", "#1e5aa8", "#c9c9c9") },
+  { name: "Cormorant Freighter",type: "ship", cargo: "goods",      year: 1950, speed: 24,  cap: 90,  price: 22000, run: 1800, rel: 0.76, look: L("cargoShip", "#3a4a5c", "#b3382c", "#26323f") },
+  { name: "Puffin Bulk Carrier",type: "ship", cargo: "coal",       year: 1950, speed: 24,  cap: 120, price: 24000, run: 1900, rel: 0.76, look: L("bulkShip", "#4a3a2c", "#d6a82e", "#2c241a") },
+  { name: "Pelican Oil Tanker", type: "ship", cargo: "oil",        year: 1950, speed: 26,  cap: 140, price: 26000, run: 2000, rel: 0.77, look: L("tanker", "#8a2c2c", "#f2f2f2", "#5a1c1c") },
+  { name: "Gannet Hydrofoil",   type: "ship", cargo: "passengers", year: 1985, speed: 70,  cap: 90,  price: 36000, run: 2600, rel: 0.86, look: L("ferry", "#e8f1fa", "#d62828", "#b7c6d6") },
+  { name: "Skua Supertanker",   type: "ship", cargo: "oil",        year: 1980, speed: 34,  cap: 300, price: 52000, run: 3600, rel: 0.85, look: L("tanker", "#1f3a5a", "#f2f2f2", "#12243a") },
+  { name: "Sparrow Prop",       type: "aircraft", cargo: "passengers", year: 1955, speed: 240,  cap: 20,  price: 30000, run: 2200, rel: 0.74, look: L("propPlane", "#d9d9d9", "#b3382c", "#a8a8a8") },
+  { name: "Wren Mailplane",     type: "aircraft", cargo: "mail",       year: 1958, speed: 260,  cap: 30,  price: 32000, run: 2300, rel: 0.75, look: L("propPlane", "#c0392b", "#f4c542", "#8a2a20") },
+  { name: "Heron Airliner",     type: "aircraft", cargo: "passengers", year: 1970, speed: 600,  cap: 70,  price: 80000, run: 4200, rel: 0.82, look: L("jet", "#f4f4f4", "#1e5aa8", "#c8c8c8") },
+  { name: "Osprey Freight Jet", type: "aircraft", cargo: "goods",      year: 1982, speed: 700,  cap: 60,  price: 95000, run: 4800, rel: 0.85, look: L("jet", "#d89a2b", "#2b2b2b", "#a87a1f") },
+  { name: "Albatross Jumbo",    type: "aircraft", cargo: "passengers", year: 1995, speed: 900,  cap: 180, price: 160000, run: 7200, rel: 0.90, look: L("jet", "#ffffff", "#0b6e4f", "#d0d0d0") },
 ];
 
 const built = [...BUSES, ...TRUCKS, ...LOCOS, ...WAGONS, ...OTHER].map(make);
@@ -378,6 +418,18 @@ function draw(look: Look): Drawn {
     case "propPlane":
       return { w: 120, inner: `<ellipse cx="58" cy="26" rx="48" ry="9" fill="${body}" stroke="${DARK}" stroke-width="1.2"/>` + poly("10,26 2,10 16,10 24,22", accent) + poly("44,26 66,26 74,38 52,38", roof)
         + windows(40, 88, 22, 5, 7) + `<rect x="104" y="14" width="3" height="24" fill="#555"/><circle cx="104" cy="26" r="3" fill="#444"/>` + wheel(60, 3, 42) + `<path d="M60 36V42" stroke="#444" stroke-width="2"/>` };
+    case "tankTruck":
+      return { w: 116, inner: truckChassis() + `<rect x="6" y="10" width="68" height="25" rx="12" fill="${body}" stroke="${DARK}" stroke-width="1.2"/>` + rect(6, 21, 68, 3, accent) + rect(30, 6, 12, 5, roof, 2) + truckCab(look, 78) };
+    case "tankWagon":
+      return { w: 86, inner: rect(4, 34, 78, 5, "#3a3a3a", 1) + `<rect x="6" y="12" width="74" height="23" rx="11" fill="${body}" stroke="${DARK}" stroke-width="1.2"/>` + rect(6, 22, 74, 3, accent) + rect(36, 7, 12, 6, roof, 2) + wheel(18, 4.5) + wheel(68, 4.5) };
+    case "tanker":
+      return { w: 126, inner: poly("4,30 122,30 110,45 14,45", body) + rect(10, 14, 20, 16, "#eee", 1) + rect(14, 8, 12, 7, accent, 1)
+        + [36, 60, 84].map(x => `<rect x="${x}" y="22" width="20" height="8" rx="3" fill="${roof}" stroke="${DARK}" stroke-width="1"/>`).join("") + rect(34, 28, 80, 2, accent)
+        + `<path d="M0 46 Q10 43 20 46 T40 46 T60 46 T80 46 T100 46 T126 46" fill="none" stroke="#7fb4e6" stroke-width="2"/>` };
+    case "bulkShip":
+      return { w: 126, inner: poly("4,30 122,30 110,45 14,45", body) + rect(98, 14, 18, 16, "#eee", 1) + rect(102, 8, 10, 7, roof, 1)
+        + [12, 40, 68].map(x => rect(x, 22, 24, 8, accent, 1) + `<path d="M${x + 2} 22 Q${x + 12} 14 ${x + 22} 22Z" fill="#2b2b2e"/>`).join("")
+        + `<path d="M0 46 Q10 43 20 46 T40 46 T60 46 T80 46 T100 46 T126 46" fill="none" stroke="#7fb4e6" stroke-width="2"/>` };
     case "jet":
       return { w: 130, inner: `<ellipse cx="62" cy="24" rx="56" ry="9" fill="${body}" stroke="${DARK}" stroke-width="1.2"/>` + poly("8,24 0,4 16,4 28,20", accent) + poly("46,26 76,26 92,40 64,40", roof)
         + `<ellipse cx="68" cy="36" rx="9" ry="4" fill="${roof}" stroke="${DARK}" stroke-width="1.2"/>` + windows(40, 104, 19, 4, 11) + rect(108, 22, 12, 4, GLASS, 1) + wheel(62, 3, 44) };

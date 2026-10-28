@@ -13,10 +13,10 @@ import type { StationState } from "./tycoon-core";
 
 export interface Pt { x: number; y: number }
 
-export type StationKind = "busStop" | "truckStop" | "trainStation";
+export type StationKind = "busStop" | "truckStop" | "trainStation" | "dock" | "airport";
 
 /** Catchment radius in tiles. A radius of 3 covers a 7 x 7 square. */
-export const CATCHMENT: Record<StationKind, number> = { busStop: 3, truckStop: 3, trainStation: 4 };
+export const CATCHMENT: Record<StationKind, number> = { busStop: 3, truckStop: 3, trainStation: 4, dock: 4, airport: 5 };
 
 export interface Station {
   id: string;

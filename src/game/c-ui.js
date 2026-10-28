@@ -45,6 +45,11 @@ const TOOLS = [
   ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile. Trains are built and serviced here."],
   ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Tap again to turn it round, again for two-way, again to remove. A train only enters the next block when it is empty."],
   ["electrify", "Electrify", () => "Electrify: " + money(cost(ELEC_COST)) + " per tile. Drag over track. Electric locomotives only run on electrified track."],
+  ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap a shore tile next to open water. Ships load and unload here."],
+  ["shipyard", "Shipyard", () => "Shipyard: " + money(cost(3500)) + ". Tap open water next to the shore. Ships are built here."],
+  ["airport", "Airport", () => "Small airport: " + money(cost(AIRPORTS.small.cost)) + ", 2 x 2 tiles. Tap the top corner of flat, clear land. Propeller planes only."],
+  ["airportL", "City airport", () => "City airport: " + money(cost(AIRPORTS.large.cost)) + ", 3 x 3 tiles, from " + AIRPORTS.large.year + ". Jets need one at both ends."],
+  ["oneway", "One-way", "One-way road: tap straight road to point traffic one way, again to turn it round, again to remove."],
   ["bridge", "Bridge", "Tap the last road or track tile before water or a hill. A bridge or tunnel is built to the far side at the same height."],
   ["raise", "Raise land", () => "Raise land: about " + money(cost(250)) + " per tile. Neighbours follow to keep slopes gentle."],
   ["lower", "Lower land", () => "Lower land: about " + money(cost(250)) + " per tile."],
@@ -133,6 +138,10 @@ function onTap(p) {
     sound.play("build"); toast(r.station.name + " built."); updateOverlay(); return;
   }
   if (tool === "depot") { const r = placeDepot(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "depot", id: r.depot.id, cost: r.cost }); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "dock") { const r = placeDock(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "station", id: r.station.id, tile: r.tile, cost: r.cost }); sound.play("build"); toast(r.station.name + " built."); return; }
+  if (tool === "shipyard") { const r = placeShipyard(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.depot.name + " built."); return; }
+  if (tool === "airport" || tool === "airportL") { const r = placeAirport(t.x, t.y, tool === "airportL" ? "large" : "small"); if (!r.ok) return toast(r.reason, true); sound.play("build"); toast(r.station.name + " built."); return; }
+  if (tool === "oneway") { const r = cycleOneWay(t.x, t.y); if (!r.ok) return toast(r.reason, true); sound.play("click"); toast(r.oneway ? "One-way road." : "Two-way road again."); return; }
   if (tool === "bridge") { const r = buildCrossing(t.x, t.y); if (!r.ok) return toast(r.reason, true); pushUndo({ kind: "crossing", net: r.net, tiles: r.added, cost: r.span.cost }); toast("Built a " + r.span.kind + " (" + r.span.length + " tiles) for " + money(r.span.cost) + "."); return; }
   if (tool === "raise" || tool === "lower") {
     const f = tool === "raise" ? terrain.raiseTile : terrain.lowerTile;
@@ -215,16 +224,16 @@ function vehicleWin(vh) {
 }
 
 // ---- vehicle shop
-const CARGO_NAME = { coal: "Coal", wood: "Timber", grain: "Grain", steel: "Steel", goods: "Goods", mail: "Mail", passengers: "Passengers" };
+const CARGO_NAME = { coal: "Coal", wood: "Timber", grain: "Grain", steel: "Steel", goods: "Goods", mail: "Mail", passengers: "Passengers", paper: "Paper", food: "Food", gold: "Gold", oil: "Oil", rubber: "Rubber", fruit: "Fruit", water: "Water", diamonds: "Diamonds", sugar: "Sugar", plastic: "Plastic", cola: "Cola", sweets: "Sweets", toys: "Toys", fizzy: "Fizzy drinks", batteries: "Batteries" };
 // Every material on this map with the wagons that carry it, and where it comes from.
 function trainCargoes(models) {
-  const m = S.map, order = ["coal", "wood", "grain", "steel", "goods", "passengers", "mail"];
-  const plural = { coalMine: ["coal mine", "coal mines"], forest: ["forest", "forests"], farm: ["farm", "farms"], steelMill: ["steel mill", "steel mills"], sawmill: ["sawmill", "sawmills"], factory: ["factory", "factories"] };
+  const m = S.map, order = climateCargos().filter(c => c !== "passengers" && c !== "mail").concat(["passengers", "mail"]);
+  const plural = (k, n) => { const l = mapgen.INDUSTRY_LABELS[k].toLowerCase(); return n === 1 ? l : /y$/.test(l) && !/ay$/.test(l) ? l.slice(0, -1) + "ies" : /s$/.test(l) ? l : l + "s"; };
   return order.map(c => {
     const wagons = models.filter(w => w.type === "wagon" && w.cargo === c).sort((a, b) => a.introYear - b.introYear);
     let sources = 0, where = "";
     if (c === "passengers" || c === "mail") { sources = m.towns.length; where = sources + " towns"; }
-    else { const by = {}; for (const i of m.industries) if (CARGO_FROM_IND[i.kind] === c) by[i.kind] = (by[i.kind] || 0) + 1; sources = Object.values(by).reduce((a, b) => a + b, 0); where = Object.entries(by).map(([k, n]) => n + " " + plural[k][n === 1 ? 0 : 1]).join(", ") || "none on this map"; }
+    else { const by = {}; for (const i of m.industries) if (CARGO_FROM_IND[i.kind] === c) by[i.kind] = (by[i.kind] || 0) + 1; sources = Object.values(by).reduce((a, b) => a + b, 0); where = Object.entries(by).map(([k, n]) => n + " " + plural(k, n)).join(", ") || "none on this map"; }
     return { cargo: c, wagons, sources, where };
   }).filter(f => f.wagons.length);
 }
@@ -234,18 +243,19 @@ function shopWin(depot, startTab) {
   openWin("shop", depot ? "Buy vehicles · " + depot.name : "Buy vehicles", (body, o) => {
     function render() {
       const models = V.availableModels(year);
-      const types = tab === "train" ? ["locomotive"] : [tab];
-      let inTab = models.filter(m => types.includes(m.type));
+      const types = tab === "train" ? ["locomotive"] : tab === "air" ? ["aircraft"] : [tab];
+      const cc = climateCargos();
+      let inTab = models.filter(m => types.includes(m.type) && (tab === "train" || cc.includes(m.cargo)));
       const cargoes = [...new Set(inTab.map(m => m.cargo))];
-      if (tab === "truck" && cargoF !== "all") inTab = inTab.filter(m => m.cargo === cargoF);
+      if ((tab === "truck" || tab === "ship") && cargoF !== "all") inTab = inTab.filter(m => m.cargo === cargoF);
       inTab.sort((a, b) => a.introYear - b.introYear || a.price - b.price);
       const sel = inTab.find(m => m.id === (tab === "train" ? locoPick : pick)) || inTab[0];
-      let h = "<div class='tabs'>" + ["bus", "truck", "train"].map(t => "<button class='" + (t === tab ? "on" : "") + "' data-a='tab' data-v='" + t + "'>" + ({ bus: "Buses", truck: "Trucks", train: "Trains" })[t] + "</button>").join("") + "</div>";
-      if (tab === "truck" && cargoes.length > 1) h += "<div class='chips'>" + ["all", ...cargoes].map(c => "<button class='" + (c === cargoF ? "on" : "") + "' data-a='cargo' data-v='" + c + "'>" + (c === "all" ? "All cargo" : c) + "</button>").join("") + "</div>";
+      let h = "<div class='tabs'>" + ["bus", "truck", "train", "ship", "air"].map(t => "<button class='" + (t === tab ? "on" : "") + "' data-a='tab' data-v='" + t + "'>" + ({ bus: "Buses", truck: "Trucks", train: "Trains", ship: "Ships", air: "Aircraft" })[t] + "</button>").join("") + "</div>";
+      if ((tab === "truck" || tab === "ship") && cargoes.length > 1) h += "<div class='chips'>" + ["all", ...cargoes].map(c => "<button class='" + (c === cargoF ? "on" : "") + "' data-a='cargo' data-v='" + c + "'>" + (c === "all" ? "All cargo" : (CARGO_NAME[c] || (core.CARGO[c] || {}).label || c)) + "</button>").join("") + "</div>";
       if (tab === "train") {
         const fams = trainCargoes(models);
         if (!fams.some(f => f.cargo === trainCargo)) trainCargo = (fams.find(f => f.sources > 0) || fams[0]).cargo;
-        h += "<h4>1. Material</h4><div class='mats'>" + fams.map(f => "<button class='mat" + (f.cargo === trainCargo ? " on" : "") + (f.sources ? "" : " none") + "' data-a='mat' data-v='" + f.cargo + "'><span class='ms'>" + V.vehicleSvg(f.wagons[0], 22) + "</span><b>" + CARGO_NAME[f.cargo] + "</b><span class='dim'>" + f.where + "</span></button>").join("") + "</div>";
+        h += "<h4>1. Material</h4><div class='mats'>" + fams.map(f => "<button class='mat" + (f.cargo === trainCargo ? " on" : "") + (f.sources ? "" : " none") + "' data-a='mat' data-v='" + f.cargo + "'><span class='ms'>" + V.vehicleSvg(f.wagons[0], 22) + "</span><b>" + (CARGO_NAME[f.cargo] || core.CARGO[f.cargo].label) + "</b><span class='dim'>" + f.where + "</span></button>").join("") + "</div>";
         const wl = fams.find(f => f.cargo === trainCargo).wagons;
         if (!wl.some(w => w.id === wagonPick)) wagonPick = wl[wl.length - 1].id;
         h += "<h4>2. Wagon</h4><div class='list short'>" + wl.map(w => "<div class='li" + (w.id === wagonPick ? " on" : "") + "' data-a='wag' data-v='" + w.id + "'><span class='ls'>" + V.vehicleSvg(w, 26) + "</span><span class='ln'>" + w.name + "</span><span>" + w.capacity + " " + V.cargoUnitLabel(w.cargo) + "</span></div>").join("") + "</div>";
@@ -260,21 +270,22 @@ function shopWin(depot, startTab) {
           if (/^(Volt|Arc|Meridian|Tempest)/.test(sel.name)) warn = (warn ? warn + " " : "") + "Electric: needs electrified track (Electrify tool), including the depot.";
           h += "<div class='kv'><span>Train length</span><b>" + trainLen({ parts: { n: cs.n } }) + " tiles</b></div>";
           preview = V.trainSvg(sel.id, w.id, cs.n, 48);
-          h += "<div class='prev'>" + preview + "</div><div class='dim'>" + (CARGO_USE[w.cargo] || "") + "</div><div class='row'>Wagons <button class='gb sm' data-a='wm'>−</button><b>" + cs.n + "</b><button class='gb sm' data-a='wp'>+</button></div>";
+          h += "<div class='prev'>" + preview + "</div><div class='dim'>" + cargoUse(w.cargo) + "</div><div class='row'>Wagons <button class='gb sm' data-a='wm'>−</button><b>" + cs.n + "</b><button class='gb sm' data-a='wp'>+</button></div>";
         } else h += "<div class='prev'>" + V.vehicleSvg(sel, 48) + "</div>";
-        if (tab !== "train" && sel.cargo) h += "<div class='kv'><span>Used for</span><b style='text-align:right'>" + (CARGO_USE[sel.cargo] || sel.cargo) + "</b></div>";
+        if (tab !== "train" && sel.cargo) h += "<div class='kv'><span>Used for</span><b style='text-align:right'>" + cargoUse(sel.cargo) + "</b></div>";
         h += "<div class='kv'><span>Cost</span><b>" + money(price) + "</b></div><div class='kv'><span>Speed</span><b>" + speed + " km/h</b></div><div class='kv'><span>Running cost</span><b>" + money(runCost) + " / year</b></div><div class='kv'><span>Capacity</span><b>" + capTxt + "</b></div><div class='kv'><span>Designed / life</span><b>" + sel.introYear + " / " + sel.maxAgeYears + " years</b></div><div class='kv'><span>Max. reliability</span><b>" + Math.round(sel.baseReliability * 100) + "%</b></div>";
         if (warn) h += "<p class='warn'>" + warn + "</p>";
-        const dk = tab === "train" ? "rail" : "road", deps = S.depots.filter(d => (d.kind || "road") === dk), hasDepot = deps.length > 0;
+        const dk = ({ train: "rail", ship: "ship", air: "air" })[tab] || "road", deps = S.depots.filter(d => (d.kind || "road") === dk && (d.owner || "player") === "player"), hasDepot = deps.length > 0;
+        if (tab === "air" && isJet(sel)) h += "<p class='dim small'>Jets need a city airport at both ends.</p>";
         if (hasDepot) { if (!deps.some(d => d.id === depSel)) depSel = deps[0].id; h += "<div class='kv'><span>Build at</span>" + (deps.length > 1 ? "<select data-a='depot'>" + deps.map(d => "<option value='" + d.id + "'" + (d.id === depSel ? " selected" : "") + ">" + d.name + "</option>").join("") + "</select>" : "<b>" + deps[0].name + "</b>") + "</div>"; }
-        h += "<button class='gb wide' data-a='buy'" + (!hasDepot ? " disabled" : "") + ">" + (!hasDepot ? (dk === "rail" ? "Build a train depot first" : "Build a road depot first") : S.company.cash < price ? "Not enough money" : tab === "train" ? "Build train" : "Build vehicle") + "</button>";
+        h += "<button class='gb wide' data-a='buy'" + (!hasDepot ? " disabled" : "") + ">" + (!hasDepot ? ({ rail: "Build a train depot first", ship: "Build a shipyard first", air: "Build an airport first", road: "Build a road depot first" })[dk] : S.company.cash < price ? "Not enough money" : tab === "train" ? "Build train" : "Build vehicle") + "</button>";
       }
       body.innerHTML = h;
       const keep = body.querySelector(".list"); if (keep && o.scroll) keep.scrollTop = o.scroll;
       body.querySelector(".list") && body.querySelector(".list").addEventListener("scroll", ev => { o.scroll = ev.target.scrollTop; });
       body.onclick = ev => {
         const t = ev.target.closest("[data-a]"); if (!t) return; const a = t.dataset.a, v = t.dataset.v;
-        if (a === "tab") { tab = v; cargoF = "all"; }
+        if (a === "tab") { tab = v; cargoF = "all"; pick = ""; }
         else if (a === "cargo") cargoF = v;
         else if (a === "pick") { if (tab === "train") locoPick = v; else pick = v; }
         else if (a === "mat") { trainCargo = v; wagonPick = ""; }
@@ -282,7 +293,7 @@ function shopWin(depot, startTab) {
         else if (a === "wm") wagons = Math.max(1, wagons - 1);
         else if (a === "wp") wagons = Math.min(20, wagons + 1);
         else if (a === "buy") {
-          const dk = tab === "train" ? "rail" : "road", dep = S.depots.find(d => d.id === depSel && (d.kind || "road") === dk) || S.depots.find(d => (d.kind || "road") === dk);
+          const dk = ({ train: "rail", ship: "ship", air: "air" })[tab] || "road", dep = S.depots.find(d => d.id === depSel && (d.kind || "road") === dk) || S.depots.find(d => (d.kind || "road") === dk && (d.owner || "player") === "player");
           if (!dep) return toast("Build a " + (dk === "rail" ? "train depot on a track" : "depot on a road") + " first.", true);
           let mid = sel.id;
           if (tab === "train") { const tm = V.buildTrainModel(sel.id, curWagon.id, wagons); if (!tm) return toast("That train cannot be built.", true); mid = tm.id; }

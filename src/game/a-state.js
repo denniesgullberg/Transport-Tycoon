@@ -6,7 +6,7 @@ const { core, vehicles: V, mapgen, terrain, roadnet, stations: ST, orders: OR, e
 const TW = 40, TH = 20, HS = 7;
 const INCOME_SCALE = 0.11;           // tycoon-core pays far more than the original; this brings it to a playable level
 const PRIMARY_OUTPUT = 2;            // mines, forests and farms produce this many times the map generator's figure
-const PRIMARY = ["coalMine", "forest", "farm"];
+const PRIMARY = mapgen.PRIMARY_INDUSTRIES;
 const FREIGHT_BONUS = 2.0, TRAIN_BONUS = 1.4, PASSENGER_OUTPUT = 1.5;   // freight and trains pay more per unit so they are worth their running costs
 const DAY_SECONDS = 0.4;             // real seconds per game day at 1x
 const ROAD_COST = 120, STATION_COST = 600, DEPOT_COST = 1500, TRACK_COST = 180, RAIL_STATION_COST = 1800, RAIL_DEPOT_COST = 2600, CLEAR_TREE = 40, BULLDOZE = 60;
@@ -22,8 +22,10 @@ const DIFF = {
   medium: { startingCash: 85000,  maxLoan: 300000, interestRate: 0.08, inflation: true,  breakdowns: 0.5, cost: 1,   growth: 1,   rivals: 2, income: 1 },
   hard:   { startingCash: 50000,  maxLoan: 200000, interestRate: 0.12, inflation: true,  breakdowns: 1,   cost: 1.5, growth: 0.6, rivals: 3, income: 0.85 },
 };
-const CARGO_FROM_IND = { coalMine: "coal", forest: "wood", farm: "grain", sawmill: "goods", factory: "goods", steelMill: "steel" };
-const CARGO_TO_IND = { coal: ["powerStation", "steelMill"], wood: ["sawmill"], grain: ["factory"], goods: [], steel: ["factory"] };
+// What each industry makes and which industries take each cargo, read from the production chains.
+const CARGO_FROM_IND = {}, CARGO_TO_IND = {};
+for (const [k, ch] of Object.entries(core.CHAINS)) { if (ch.out) CARGO_FROM_IND[k] = ch.out; for (const c of ch.in || []) (CARGO_TO_IND[c] = CARGO_TO_IND[c] || []).push(k); }
+for (const c of Object.keys(core.CARGO)) CARGO_TO_IND[c] = CARGO_TO_IND[c] || [];
 const CARGO_USE = { coal: "Coal: mine to power station or steel mill", wood: "Timber: forest to sawmill", grain: "Grain: farm to factory", goods: "Goods: sawmill or factory to towns", steel: "Steel: steel mill to factory", mail: "Mail: between towns", passengers: "Passengers: between towns" };
 const RIVAL_COLORS = ["#c0392b", "#7b3fa0", "#e07b00", "#12a39a"];
 const PLAYER_COLOR = "#1e5aa8";
@@ -46,7 +48,10 @@ function cost(n) { return Math.round(n * S.settings.cost * S.inflation); }
 function newGame(cfg) {
   const settings = { ...DIFF[cfg.difficulty] };
   if (cfg.rivals != null) settings.rivals = cfg.rivals;
-  const map = mapgen.generateMap(String(cfg.seed), { size: cfg.mapSize, towns: cfg.towns, ...CLIM[cfg.climate].map });
+  const opts = { size: cfg.mapSize, towns: cfg.towns, ...CLIM[cfg.climate].map, climate: cfg.climate, names: cfg.names || (cfg.climate === "toyland" ? "silly" : "english") };
+  if (cfg.water != null) opts.lakes = cfg.water;
+  if (cfg.rivers != null) opts.rivers = cfg.rivers;
+  const map = mapgen.generateMap(String(cfg.seed), opts);
   for (const i of map.industries) if (PRIMARY.includes(i.kind)) i.productionPerMonth *= PRIMARY_OUTPUT;
   const company = core.newCompany();
   company.cash = settings.startingCash; company.maxLoan = settings.maxLoan; company.interestRate = settings.interestRate;
@@ -56,10 +61,11 @@ function newGame(cfg) {
     news: EV.newNewsLog(), evState: EV.newEventState(), objectives: EV.defaultObjectives(cfg.startYear),
     ledgers: [], acc: {}, history: [], metrics: { passengers: 0, cargo: 0, quarterCargo: 0 },
     qIncome: 0, quarterlyIncome: [], monthNet: [], bank: "ok", gameOver: false,
-    rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, townRating: {}, ads: {}, railOwner: {}, replace: { renew: false, rules: {} }, retireYear: cfg.retireYears ? cfg.startYear + cfg.retireYears : null, name: "Oakwood Transport",
+    rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, oneway: {}, townRating: {}, ads: {}, railOwner: {}, replace: { renew: false, rules: {} }, retireYear: cfg.retireYears ? cfg.startYear + cfg.retireYears : null, name: "Oakwood Transport",
   };
   for (let i = 0; i < settings.rivals; i++) S.rivals.push({ ai: AI.createAi(i, settings.startingCash, 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] });
   initRuntime();
+  makeRigDocks(); rebuildSea();
   EV.addNews(S.news, S.date, "info", "Welcome to " + CLIM[cfg.climate].label + " valley. Build roads, stops and a depot, then buy a vehicle.");
   ui.paused = false;
 }
@@ -72,7 +78,10 @@ function initRuntime() {
   for (const p of (S.railTiles || [])) R.rail.addRoad(p.x, p.y);
   if (!S.signals) S.signals = {}; if (!S.elec) S.elec = {};
   rebuildLookups();
-  for (const vh of S.vehicles) if (!isTrain(vh)) netOf(vh).moveVehicle(vh.id, null, vh.state === "moving" ? vh.to : vh.tile);
+  if (!S.oneway) S.oneway = {};
+  R.roads.stepOk = oneWayOk;
+  rebuildSea();
+  for (const vh of S.vehicles) if (!isTrain(vh) && !isAir(vh)) netOf(vh).moveVehicle(vh.id, null, vh.state === "moving" ? vh.to : vh.tile);
   rebuildRailRes();
 }
 function rebuildLookups() {
@@ -93,10 +102,12 @@ function depotById(id) { return S.depots.find(d => d.id === id); }
 function modelOf(vh) { return V.getModel(vh.modelId); }
 function isTrainModel(m) { return !!m && m.type === "train"; }
 function isTrain(vh) { return isTrainModel(modelOf(vh)); }
-function netOf(vh) { return isTrain(vh) ? R.rail : R.roads; }
-function netFor(dk) { return dk === "rail" ? R.rail : R.roads; }
-function depotKindOf(m) { return isTrainModel(m) ? "rail" : "road"; }
-function stationKindFor(m) { return m.type === "bus" ? "busStop" : isTrainModel(m) ? "trainStation" : "truckStop"; }
+function netOf(vh) { return netFor(depotKindOf(modelOf(vh))); }
+function netFor(dk) { return dk === "rail" ? R.rail : dk === "ship" ? R.sea : dk === "air" ? ANYWHERE : R.roads; }
+function depotKindOf(m) { return isTrainModel(m) ? "rail" : isShipModel(m) ? "ship" : isAirModel(m) ? "air" : "road"; }
+function stationKindFor(m) { return m.type === "bus" ? "busStop" : isTrainModel(m) ? "trainStation" : isShipModel(m) ? "dock" : isAirModel(m) ? "airport" : "truckStop"; }
+// Where a vehicle of this kind stands when it is "at" a station: ships wait on the water by the dock.
+function stationPoint(s) { return s.kind === "dock" && s.water ? s.water : s.kind === "airport" ? airportCentre(s) : s; }
 function tractionOf(vh) { const m = modelOf(vh); if (!isTrainModel(m)) return "road"; const loco = V.getModel(m.parts.locoId); const n = loco ? loco.name : ""; return /^(Volt|Arc|Meridian|Tempest)/.test(n) ? "electric" : /^(Kestrel|Warbler|Lancer|Condor)/.test(n) ? "steam" : "diesel"; }
 function syncPersist() { S.roadTiles = R.roads.tiles(); S.railTiles = R.rail.tiles(); }
 function playerVehicles() { return S.vehicles.filter(v => v.owner === "player"); }
@@ -132,7 +143,7 @@ function producesAt(st, cargo) {
 function acceptsAt(st, cargo) {
   const c = covered(st);
   if (cargo === "passengers" || cargo === "mail") return c.houses > 0;
-  if (cargo === "goods") return c.houses > 3;
+  if (core.TOWN_CARGO.includes(cargo) && c.houses > ((cargo === "gold" || cargo === "diamonds") ? 20 : 3)) return true;
   return c.inds.some(i => (CARGO_TO_IND[cargo] || []).includes(i.kind));
 }
 function serviceRatingOf(indId) {
@@ -167,30 +178,34 @@ function removeVehicle(vh) {
 }
 function bestPair(cargo, nearTile, stKind, net) {
   net = net || R.roads;
-  const cand = S.stations.filter(s => s.owner === "player" && (!stKind || s.kind === stKind) && net.connected(s, nearTile));
+  const pt = (s) => stationPoint(s), m0 = arguments[4];
+  const cand = S.stations.filter(s => (s.owner === "player" || s.owner === "public") && (!stKind || s.kind === stKind) && (!m0 || canUseStation(m0, s)) && net.connected(pt(s), nearTile));
   let best = null, bd = -1;
   for (const a of cand) {
     if (!producesAt(a, cargo)) continue;
     for (const b of cand) {
       if (a === b || !acceptsAt(b, cargo)) continue;
       const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-      if (d >= 6 && d > bd && net.connected(a, b)) { bd = d; best = [a.id, b.id]; }
+      if (d >= 6 && d > bd && net.connected(pt(a), pt(b))) { bd = d; best = [a.id, b.id]; }
     }
   }
   return best;
 }
 function buyVehicle(modelId, depot) {
   const m = V.getModel(modelId);
-  if (!m || !m.supported || (m.type !== "bus" && m.type !== "truck" && m.type !== "train")) return { ok: false, msg: "This vehicle type is not playable yet." };
+  if (!m || !m.supported || !["bus", "truck", "train", "ship", "aircraft"].includes(m.type)) return { ok: false, msg: "This vehicle type is not playable yet." };
   const dk = depotKindOf(m);
-  if ((depot.kind || "road") !== dk) return { ok: false, msg: dk === "rail" ? "Trains are built at a train depot on a track." : "Buses and trucks are built at a road depot." };
+  if ((depot.kind || "road") !== dk) return { ok: false, msg: ({ rail: "Trains are built at a train depot on a track.", ship: "Ships are built at a shipyard.", air: "Aircraft are bought at an airport.", road: "Buses and trucks are built at a road depot." })[dk] };
+  if (dk === "air" && isJet(m) && (stationById(depot.airport) || {}).size !== "large") return { ok: false, msg: "Jets need a city airport." };
   if (isTrainModel(m) && /^(Volt|Arc|Meridian|Tempest)/.test((V.getModel(m.parts.locoId) || {}).name || "") && !isElec(depot.x, depot.y)) return { ok: false, msg: "Electric locomotives need electrified track. Electrify the depot and the line first." };
   if ((depot.owner || "player") !== "player") return { ok: false, msg: "That depot belongs to another company." };
   const price = vehiclePrice(m);
   if (S.company.cash < price) return { ok: false, msg: "Not enough money." };
-  const pair = bestPair(m.cargo, depot, stationKindFor(m), netFor(dk));
+  const near = dk === "ship" ? { x: depot.x, y: depot.y } : depot;
+  const pair = bestPair(m.cargo, near, stationKindFor(m), netFor(dk), m);
   spend("newVehicles", price);
   const vh = makeVehicle("player", modelId, depot, pair || []);
+  if (dk === "air") { vh.core.breakdownsEnabled = false; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
   sound.play("build");
   return { ok: true, vh, pair };
 }
@@ -221,32 +236,36 @@ function nearestDepot(t, dk, owner) {
 // at a stop leave the road free. A stop tile takes two parked vehicles; more wait in line.
 function roadCanEnter(vh, next, target) {
   const dx = next.x - vh.tile.x, dy = next.y - vh.tile.y;
-  let same = 0, parked = 0;
+  let same = 0, parked = 0, oncoming = 0, slowest = 1e9;
   for (const id of R.roads.vehiclesAt(next)) {
     if (id === vh.id) continue;
     const o = S.vehicles.find(v => v.id === id); if (!o) continue;
     if (o.state === "docked") { parked++; continue; }
-    if (o.dir && o.dir.dx === dx && o.dir.dy === dy) same++;
+    if (o.dir && o.dir.dx === dx && o.dir.dy === dy) { same++; slowest = Math.min(slowest, (modelOf(o) || { speedKmh: 0 }).speedKmh); }
+    else if (o.dir && o.dir.dx === -dx && o.dir.dy === -dy) oncoming++;
   }
-  if (same >= 2) return false;
+  // a faster vehicle may pull out and overtake when nothing is coming the other way
+  const overtake = oncoming === 0 && !S.oneway[key(next.x, next.y)] && (modelOf(vh) || { speedKmh: 0 }).speedKmh > slowest;
+  if (same >= (overtake ? 3 : 2)) return false;
   if (target && sameT(target, next) && R.stationAt.has(key(next.x, next.y)) && parked >= 2) return false;
   return true;
 }
 function tryStep(vh) {
   if (vh.stopped) { if (vh.state !== "docked") vh.state = "idle"; return; }
   if (isTrain(vh)) return trainStep(vh);
+  if (isAir(vh)) return airStep(vh);
   const dest = destTile(vh);
   if (!dest) { vh.state = "idle"; return; }
   let target = dest;
   if (vh.bayFor !== dest.id) { vh.bay = null; vh.bayFor = dest.id; }
-  if (dest.kind === "stop") { const st = stationById(dest.id); if (st && stationTiles(st).some(t => sameT(t, vh.tile))) { if (OR.arrive(vh.orders, { kind: "stop", id: st.id })) { vh.bay = null; dock(vh, dest); return; } } if (st) target = bayFor(vh, st); }
+  if (dest.kind === "stop") { const st = stationById(dest.id); if (st && (st.kind === "dock" ? sameT(st.water, vh.tile) : stationTiles(st).some(t => sameT(t, vh.tile)))) { if (OR.arrive(vh.orders, { kind: "stop", id: st.id })) { vh.bay = null; dock(vh, dest); return; } } if (st) target = st.kind === "dock" ? st.water : bayFor(vh, st); }
   else if (vh.tile.x === dest.x && vh.tile.y === dest.y) {
     if (OR.arrive(vh.orders, { kind: dest.kind, id: dest.id })) { dock(vh, dest); return; }
   }
   const net = netOf(vh);
   const next = net.nextTile(vh.id, vh.tile, target);
   if (!next) { vh.state = "idle"; vh.wait++; if (vh.wait > 240) { vh.wait = 0; OR.skipOrder(vh.orders); } return; }
-  if (!roadCanEnter(vh, next, target)) { vh.state = "idle"; return; }
+  if (net === R.sea ? !net.canEnter(vh.id, next) : !roadCanEnter(vh, next, target)) { vh.state = "idle"; return; }
   if (R.res.has(next.y * S.map.w + next.x)) { vh.state = "idle"; return; }   // barriers down: a train is coming
   net.moveVehicle(vh.id, vh.tile, next);
   vh.from = { x: vh.tile.x, y: vh.tile.y }; vh.to = next; vh.p = 0; vh.state = "moving"; vh.wait = 0;
@@ -274,6 +293,8 @@ function dock(vh, dest) {
     else { const rv = S.rivals.find(r => r.ai.id === vh.owner); if (rv) { const route = rv.ai.routes.find(x => x.fromStation === from.id && x.toStation === st.id); if (route) AI.recordIncome(rv.ai, route.id, inc); else rv.ai.cash += inc; } }
     // deliver raw cargo to industries that use it
     for (const i of covered(st).inds) if ((CARGO_TO_IND[vh.cargo] || []).includes(i.kind)) { i.input[vh.cargo] = (i.input[vh.cargo] || 0) + vh.loaded; i.received = i.received || {}; i.received[vh.cargo] = (i.received[vh.cargo] || 0) + vh.loaded; break; }
+    // food and water keep snow and desert towns growing
+    if (vh.cargo === "food" || vh.cargo === "water") for (const tid of covered(st).towns) { const t = S.map.towns.find(x => x.id === tid); if (t && t.needs === vh.cargo) { t.fedDays = 120; t.got = (t.got || 0) + vh.loaded; } }
     vh.loaded = 0; vh.origin = null;
   }
 }
@@ -317,6 +338,7 @@ function depotsExist() { return S.depots.length > 0; }
 function moveVehicles(dtDays) {
   for (const vh of S.vehicles) {
     if (vh.broken || vh.stopped) continue;
+    if (vh.state === "moving" && isAir(vh)) { airMove(vh, dtDays); continue; }
     if (vh.state === "moving") {
       const m = modelOf(vh); if (!m) continue;
       const tilesPerDay = m.speedKmh / 40 * netOf(vh).speedFactor(vh.from, vh.to, tractionOf(vh));
@@ -341,6 +363,8 @@ function dailyTick() {
   S.date = st.date; S.totalDays++;
   const m = S.map;
   for (const t of m.towns) {
+    if (t.fedDays > 0) t.fedDays--;
+    if (t.needs && !(t.fedDays > 0)) continue;   // snow and desert towns wait for food or water
     t._acc = (t._acc || 0) + S.settings.growth;
     while (t._acc >= 1) {
       t._acc -= 1;
@@ -393,7 +417,7 @@ function monthlyTick() {
   for (const a of actions) {
     if (a.kind === "setProduction") { const i = m.industries.find(x => x.id === a.industryId); if (i) i.productionPerMonth = a.value; }
     if (a.kind === "closeIndustry") removeIndustry(a.industryId);
-    if (a.kind === "openIndustry") { const s = mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) { const ni = m.industries[m.industries.length - 1]; if (PRIMARY.includes(ni.kind)) ni.productionPerMonth *= PRIMARY_OUTPUT; rebuildLookups(); } }
+    if (a.kind === "openIndustry") { const ck = mapgen.CLIMATE_INDUSTRIES[S.cfg.climate] || []; if (!ck.includes(a.industryKind)) a.industryKind = ck.filter(k => k !== "oilRig")[Math.floor(rng() * Math.max(1, ck.length - 1))]; const s = mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) { const ni = m.industries[m.industries.length - 1]; if (PRIMARY.includes(ni.kind)) ni.productionPerMonth *= PRIMARY_OUTPUT; rebuildLookups(); } }
     if (a.kind === "setInterestRate") S.company.interestRate = a.value;
   }
   const reward = EV.checkObjectives(S.objectives, metricsNow(), S.date, S.news);

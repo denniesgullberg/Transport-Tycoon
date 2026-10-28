@@ -19,7 +19,7 @@ function moveOrder(vh, i, dir) {
   if (o.current === i) o.current = j; else if (o.current === j) o.current = i;
   return true;
 }
-function similarVehicles(vh) { const m = modelOf(vh); return playerVehicles().filter(v => v !== vh && v.cargo === vh.cargo && stationKindFor(modelOf(v)) === stationKindFor(m)); }
+function similarVehicles(vh) { const m = modelOf(vh); return playerVehicles().filter(v => v !== vh && v.cargo === vh.cargo && stationKindFor(modelOf(v)) === stationKindFor(m) && isJet(modelOf(v)) === isJet(m)); }
 function copyOrdersToSimilar(vh) {
   const list = similarVehicles(vh);
   for (const v of list) { const n = OR.cloneOrders(vh.orders, v.id); v.orders = n; v.state = v.state === "docked" ? "idle" : v.state; for (const od of n.orders) if (od.kind === "stop") markServed(stationById(od.stationId), v.cargo); }
@@ -43,7 +43,7 @@ function orderWarnings(vh) {
 function ordersEditor(vh, box, onChange) {
   const m = modelOf(vh), mine = vh.owner === "player";
   function render() {
-    const sts = S.stations.filter(s => s.owner === vh.owner && (!mine || s.kind === stationKindFor(m)));
+    const sts = S.stations.filter(s => (s.owner === vh.owner || s.owner === "public") && (!mine || (s.kind === stationKindFor(m) && canUseStation(m, s))));
     const opt = (sel) => sts.map(s => "<option value='" + s.id + "'" + (s.id === sel ? " selected" : "") + ">" + s.name + "</option>").join("");
     let h = "<h4>Orders</h4>";
     const list = vh.orders.orders;
@@ -60,7 +60,7 @@ function ordersEditor(vh, box, onChange) {
           "<div class='row'><button data-a='up' data-i='" + i + "'" + (i === 0 ? " disabled" : "") + ">Up</button><button data-a='down' data-i='" + i + "'" + (i === list.length - 1 ? " disabled" : "") + ">Down</button><button data-a='go' data-i='" + i + "'>Go here now</button><button data-a='del' data-i='" + i + "'>Remove</button></div>" : "") + "</div>";
     });
     if (mine) {
-      h += sts.length ? "<div class='row'><select id='add-" + vh.id + "'>" + opt("") + "</select><button class='gb sm' data-a='add'>Add stop</button></div>" : "<p class='warn'>Build a " + ({ busStop: "bus stop", truckStop: "truck stop", trainStation: "train station" })[stationKindFor(m)] + " first.</p>";
+      h += sts.length ? "<div class='row'><select id='add-" + vh.id + "'>" + opt("") + "</select><button class='gb sm' data-a='add'>Add stop</button></div>" : "<p class='warn'>Build a " + ({ busStop: "bus stop", truckStop: "truck stop", trainStation: "train station", dock: "dock", airport: "airport" })[stationKindFor(m)] + " first.</p>";
       const sim = similarVehicles(vh).length;
       if (sim) h += "<button class='gb sm' data-a='copy'>Copy these orders to " + sim + " similar vehicle" + (sim > 1 ? "s" : "") + "</button>";
     }

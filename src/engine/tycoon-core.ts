@@ -15,7 +15,9 @@ export type { VehicleModel };
 // 1. CARGO + PAYMENT
 // ---------------------------------------------------------------------------
 
-export type CargoId = "passengers" | "mail" | "coal" | "goods" | "wood" | "steel" | "grain";
+export type CargoId = "passengers" | "mail" | "coal" | "goods" | "wood" | "steel" | "grain"
+  | "paper" | "food" | "gold" | "oil" | "rubber" | "fruit" | "water" | "diamonds"
+  | "sugar" | "plastic" | "cola" | "sweets" | "toys" | "fizzy" | "batteries";
 
 export interface CargoDef {
   id: CargoId;
@@ -33,6 +35,21 @@ export const CARGO: Record<CargoId, CargoDef> = {
   wood:       { id: "wood",       label: "Wood",       basePay: 46, days1: 15, days2: 255 },
   steel:      { id: "steel",      label: "Steel",      basePay: 55, days1: 7,  days2: 255 },
   grain:      { id: "grain",      label: "Grain",      basePay: 42, days1: 4,  days2: 40 },
+  paper:      { id: "paper",      label: "Paper",      basePay: 52, days1: 7,  days2: 60 },
+  food:       { id: "food",       label: "Food",       basePay: 55, days1: 0,  days2: 30 },
+  gold:       { id: "gold",       label: "Gold",       basePay: 80, days1: 10, days2: 40 },
+  oil:        { id: "oil",        label: "Oil",        basePay: 50, days1: 25, days2: 255 },
+  rubber:     { id: "rubber",     label: "Rubber",     basePay: 48, days1: 2,  days2: 20 },
+  fruit:      { id: "fruit",      label: "Fruit",      basePay: 50, days1: 0,  days2: 15 },
+  water:      { id: "water",      label: "Water",      basePay: 45, days1: 20, days2: 80 },
+  diamonds:   { id: "diamonds",   label: "Diamonds",   basePay: 90, days1: 10, days2: 255 },
+  sugar:      { id: "sugar",      label: "Sugar",      basePay: 45, days1: 20, days2: 255 },
+  plastic:    { id: "plastic",    label: "Plastic",    basePay: 48, days1: 25, days2: 255 },
+  cola:       { id: "cola",       label: "Cola",       basePay: 50, days1: 25, days2: 255 },
+  sweets:     { id: "sweets",     label: "Sweets",     basePay: 60, days1: 5,  days2: 30 },
+  toys:       { id: "toys",       label: "Toys",       basePay: 62, days1: 5,  days2: 30 },
+  fizzy:      { id: "fizzy",      label: "Fizzy drinks", basePay: 55, days1: 5, days2: 30 },
+  batteries:  { id: "batteries",  label: "Batteries",  basePay: 50, days1: 25, days2: 255 },
 };
 
 /** Time factor: 1.0 when fast, falls toward 0.31 when slow. Same shape as TTD. */
@@ -113,7 +130,7 @@ export function cargoAcceptedAtStation(produced: number, rating: number): number
 
 export interface Industry {
   id: string;
-  kind: "coalMine" | "powerStation" | "forest" | "sawmill" | "farm" | "factory" | "steelMill" | "ironOreMine";
+  kind: string;
   x: number;
   y: number;
   productionPerMonth: number;
@@ -128,10 +145,34 @@ export const CHAINS: Record<string, { in?: CargoId[]; out?: CargoId; ratio?: num
   forest:       { out: "wood" },
   farm:         { out: "grain" },
   sawmill:      { in: ["wood"],           out: "goods", ratio: 1 },
-  factory:      { in: ["grain", "steel"], out: "goods", ratio: 1 },
+  factory:      { in: ["grain", "steel", "rubber"], out: "goods", ratio: 1 },
   steelMill:    { in: ["coal"],           out: "steel", ratio: 1 },
   powerStation: { in: ["coal"] }, // consumes only
+  // oil (temperate, arctic, tropical)
+  oilRig:       { out: "oil" },
+  oilWell:      { out: "oil" },
+  refinery:     { in: ["oil"],            out: "goods", ratio: 1 },
+  // sub-arctic
+  paperMill:    { in: ["wood"],           out: "paper", ratio: 1 },
+  printingWorks:{ in: ["paper"],          out: "goods", ratio: 1 },
+  foodPlant:    { in: ["grain", "fruit"], out: "food",  ratio: 1 },
+  goldMine:     { out: "gold" },
+  // sub-tropical
+  rubberPlantation: { out: "rubber" },
+  fruitPlantation:  { out: "fruit" },
+  waterSupply:  { out: "water" },
+  diamondMine:  { out: "diamonds" },
+  // toyland
+  sugarMine:    { out: "sugar" },
+  sweetFactory: { in: ["sugar"],          out: "sweets", ratio: 1 },
+  plasticFountain: { out: "plastic" },
+  batteryFarm:  { out: "batteries" },
+  toyFactory:   { in: ["plastic", "batteries"], out: "toys", ratio: 1 },
+  colaWells:    { out: "cola" },
+  fizzyFactory: { in: ["cola"],           out: "fizzy", ratio: 1 },
 };
+/** Cargo that towns accept (gold and diamonds only in towns big enough for a bank). */
+export const TOWN_CARGO: CargoId[] = ["goods", "food", "water", "gold", "diamonds", "sweets", "toys", "fizzy"];
 
 /** Run once per game month. Includes TTD-style random production drift. */
 export function tickIndustryMonth(ind: Industry, rng: () => number = Math.random): void {

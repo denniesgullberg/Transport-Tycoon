@@ -191,8 +191,9 @@ function showEndScreen(reason, r, entry) {
 
 // ------------------------------------------------------------ cargo payment rates
 const RATE_COL = { passengers: "#2e6f9e", mail: "#c0392b", coal: "#2b2b2e", goods: "#7b3fa0", wood: "#8a5a2b", steel: "#6b7785", grain: "#c99a1e" };
+function rateCol(c) { return RATE_COL[c] || PILE_COL[c] || "#888"; }
 function cargoRatesSvg() {
-  const cs = Object.keys(core.CARGO), W = 320, H = 180, L = 46, Rr = 8, T = 8, B = 22, days = [];
+  const cs = climateCargos(), W = 320, H = 180, L = 46, Rr = 8, T = 8, B = 22, days = [];
   for (let d = 0; d <= 200; d += 10) days.push(d);
   const pay = (c, d) => core.deliveryIncome(c, 10, { x: 0, y: 0 }, { x: 20, y: 0 }, d, S.inflation) * INCOME_SCALE * ((c === "passengers" || c === "mail") ? 1 : FREIGHT_BONUS);
   const hi = Math.max(...cs.map(c => pay(c, 0))) * 1.05;
@@ -200,6 +201,6 @@ function cargoRatesSvg() {
   let g = "";
   for (let t = 0; t <= 4; t++) { const v = hi * t / 4; g += "<line x1='" + L + "' x2='" + (W - Rr) + "' y1='" + y(v) + "' y2='" + y(v) + "' stroke='#b8b088'/><text x='" + (L - 4) + "' y='" + (y(v) + 3) + "' font-size='9' text-anchor='end' fill='#4a4426'>£" + Math.round(v) + "</text>"; }
   days.forEach((d, i) => { if (d % 50 === 0) g += "<text x='" + x(i) + "' y='" + (H - 6) + "' font-size='9' text-anchor='middle' fill='#4a4426'>" + d + "</text>"; });
-  for (const c of cs) g += "<polyline fill='none' stroke='" + RATE_COL[c] + "' stroke-width='2' points='" + days.map((d, i) => x(i).toFixed(1) + "," + y(pay(c, d)).toFixed(1)).join(" ") + "'/>";
-  return "<svg viewBox='0 0 " + W + " " + H + "' class='gr'>" + g + "</svg><div class='legend'>" + cs.map(c => "<span><i style='background:" + RATE_COL[c] + "'></i>" + (CARGO_NAME[c] || c) + "</span>").join("") + "</div><p class='dim small'>Payment for 10 units carried 20 tiles, by days in transit. Trains earn " + TRAIN_BONUS + " times this.</p>";
+  for (const c of cs) g += "<polyline fill='none' stroke='" + rateCol(c) + "' stroke-width='2' points='" + days.map((d, i) => x(i).toFixed(1) + "," + y(pay(c, d)).toFixed(1)).join(" ") + "'/>";
+  return "<svg viewBox='0 0 " + W + " " + H + "' class='gr'>" + g + "</svg><div class='legend'>" + cs.map(c => "<span><i style='background:" + rateCol(c) + "'></i>" + (CARGO_NAME[c] || c) + "</span>").join("") + "</div><p class='dim small'>Payment for 10 units carried 20 tiles, by days in transit. Trains earn " + TRAIN_BONUS + " times this.</p>";
 }
