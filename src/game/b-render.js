@@ -192,6 +192,7 @@ function drawTrack(px, py, x, y, crossing) {
     ctx.fillStyle = "#222"; ctx.fillRect(px + ox - 3, py + oy - 19, 6, 7);
     ctx.fillStyle = free ? "#3ddc5a" : "#ff3b30"; ctx.beginPath(); ctx.arc(px + ox, py + oy - 15.5, 2, 0, 7); ctx.fill();
     if (sg.two) { ctx.fillStyle = "#fff"; ctx.fillRect(px + ox - 3, py + oy - 21, 6, 2); }
+    if (sg.path) { ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(px + ox - 3, py + oy - 19); ctx.lineTo(px + ox + 3, py + oy - 19); ctx.lineTo(px + ox, py + oy - 23); ctx.fill(); }
   }
 }
 function drawStation(px, py, s, x, y) {
@@ -332,7 +333,8 @@ function drawVehicle(v, pos) {
     return;
   }
   const k = isTrain(v) ? Math.min(0.3, 66 / img.naturalWidth) : 0.3, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy);
+  const lk = isShip(v) ? null : (modelOf(v) || {}).look;
+  isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy, lk);
   if (v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(pos.x, pos.y - 20, 4, 0, 7); ctx.fill(); }
   else if (v.loaded > 0 && view.z > 1.2) { ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fillRect(pos.x - 3, pos.y - 20, 6, 3); }
 }
@@ -367,7 +369,7 @@ function trainUnits(v) {
 function drawUnit(v, u) {
   const img = spriteFor(u.id); if (!img) return;
   const k = (u.loco ? 17 : 15) / img.naturalWidth, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  isoSprite(img, u.x, u.y + 2, w, h, u.dx || u.dy ? u.dx : 1, u.dy || 0);
+  isoSprite(img, u.x, u.y + 2, w, h, u.dx || u.dy ? u.dx : 1, u.dy || 0, (V.getModel(u.id) || {}).look);
   if (u.loco && v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(u.x, u.y - 16, 4, 0, 7); ctx.fill(); }
   else if (u.loco && v.red && view.z > 1) { ctx.fillStyle = "rgba(255,60,40,.9)"; ctx.fillRect(u.x - 2, u.y - 18, 4, 4); }
 }

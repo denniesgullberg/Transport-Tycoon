@@ -205,7 +205,7 @@ function buyVehicle(modelId, depot) {
   const pair = bestPair(m.cargo, near, stationKindFor(m), netFor(dk), m);
   spend("newVehicles", price);
   const vh = makeVehicle("player", modelId, depot, pair || []);
-  if (dk === "air") { vh.core.breakdownsEnabled = false; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
+  if (dk === "air") { vh.core.breakdownsEnabled = S.settings.breakdowns > 0; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
   sound.play("build");
   return { ok: true, vh, pair };
 }
@@ -302,7 +302,8 @@ function dock(vh, dest) {
 function dailyVehicle(vh) {
   const m = modelOf(vh); if (!m) return;
   const r = core.tickVehicleDay(vh.core, m, () => rng() / Math.max(0.01, S.settings.breakdowns || 1));
-  if (r === "broke") { vh.broken = true; if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", m.name + " has broken down.", { x: vh.tile.x, y: vh.tile.y }); sound.play("breakdown"); } }
+  if (r === "broke" && isAir(vh)) aircraftEmergency(vh);
+  else if (r === "broke") { vh.broken = true; if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", m.name + " has broken down.", { x: vh.tile.x, y: vh.tile.y }); sound.play("breakdown"); } }
   else if (r === "ok") vh.broken = false;
   if (vh.stopped) return;   // stopped vehicles cost nothing to run and do not load
   if (vh.owner === "player") {
@@ -429,6 +430,7 @@ function monthlyTick() {
     const log = AI.tickAiMonth(rv.ai, aiApi(rv), ends, S.date.year, rng);
     for (const line of log) EV.addNews(S.news, S.date, "info", line);
     rivalRailMonth(rv);
+    rivalSeaAirMonth(rv);
   }
   let inc = 0, exp = 0; for (const k of Object.keys(S.acc)) { if (S.acc[k] > 0) inc += S.acc[k]; else exp -= S.acc[k]; }
   monthIncomeTrack(inc, exp);

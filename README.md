@@ -9,12 +9,13 @@ Play it: open `dist/transport-co.html` in a browser, or the published Claude art
 - Random maps from a seed in four climates, each with its own industries and cargo (22 cargo types). Water, rivers, size up to 160 x 160, and English, Swedish, German, French or silly town names
 - Roads, one-way roads, bus and truck stops with several bays, depots, railway track, level crossings, signals, electrification, multi-tile stations, docks, shipyards, small and city airports, bridges, tunnels, raising and lowering land, undo
 - Buses, trucks for every cargo, locomotives with wagons for every cargo, ships (ferries, freighters, bulk carriers, oil tankers) and aircraft (propeller, mail, jets)
-- Trains several tiles long that reserve track and wait at red signals; passing loops; stuck trains are reported
+- Trains several tiles long that reserve track; block signals and path signals; passing loops; stuck trains are reported
 - Industry chains per climate; snow towns need food and desert towns need water to grow; oil rigs at sea
 - Fleet window with orders per stop (load what's available, full load, no loading), start, stop, clone, refit, autorenew and autoreplace
-- Town councils that rate your company, advertising and tree planting; rival companies that build roads and railways; buying shares and taking rivals over
+- Town councils that rate your company, advertising and tree planting; rival companies that build roads, railways, tanker and air routes; buying shares and taking rivals over
 - Finances, loans, inflation, graphs, cargo payment chart, news, objectives, scenarios, retirement with a score and high-score table
-- Save slots, autosave, export and import, settings with music, a first-game tutorial, a minimap, follow a vehicle, keyboard shortcuts, and a desktop layout
+- Breakdowns for every vehicle, with emergency landings for planes
+- Save slots, autosave, export and import, cloud saves in your Claude account, online races on a shared map, settings with music, a first-game tutorial, a minimap, follow a vehicle, keyboard shortcuts, and a desktop layout
 
 ## Layout
 
@@ -26,7 +27,7 @@ src/game/     The playable game in plain JS, joined in the order listed in scrip
               a3-content (climates, ships, aircraft, one-way roads), b-render (drawing),
               c-ui (input, tools, windows), c2-fleet (orders, fleet), c3-tools (settings,
               saves, undo), c4-vehicles (start/stop, renew, refit, stations), c5-world
-              (towns, rivals, shares, scenarios), c6-polish (tutorial, minimap, keys),
+              (towns, rivals, shares, scenarios), c6-polish (tutorial, minimap, keys), c7-online (cloud saves, races),
               d-main (menus, main loop, demos), e-tests (the test suite)
 scripts/      build.mjs makes dist/transport-co.html, test.mjs runs the tests headless
 dist/         The built game, ready to open or publish

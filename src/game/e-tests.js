@@ -187,7 +187,7 @@ const TESTS = [
     assert(bulldoze(rd.x, rd.y).ok && R.roads.hasRoad(rd.x, rd.y) && !R.rail.hasRoad(rd.x, rd.y), "bulldoze takes the rails and leaves the road");
     const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(buildTrackTile(free.x, free.y).ok, "track"); assert(buildRoadTile(free.x, free.y).ok && crossingAt(free.x, free.y), "road over track makes a crossing too");
   }],
-  ["rail", "Passing loop with one-way signals: two trains pass; without signals a stuck train is reported", () => {
+  ["rail", "Passing loop with one-way path signals: two trains pass; without signals a stuck train is reported", () => {
     let area = null;
     for (const seed of ["71", "72", "73", "74", "75"]) {
       startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed });
@@ -201,7 +201,7 @@ const TESTS = [
     const west = placeStation(X, Y, "trainStation", "player").station; placeStation(X + 1, Y, "trainStation", "player");
     const east = placeStation(X + 11, Y, "trainStation", "player").station; placeStation(X + 10, Y, "trainStation", "player");
     eq(stationTiles(west).length, 2, "two-tile platform");
-    S.signals[key(X + 6, Y)] = { dx: 1, dy: 0, two: false }; S.signals[key(X + 5, Y + 2)] = { dx: -1, dy: 0, two: false };
+    S.signals[key(X + 6, Y)] = { dx: 1, dy: 0, two: false, path: true }; S.signals[key(X + 5, Y + 2)] = { dx: -1, dy: 0, two: false, path: true };   // path signals: the loop has no signal at the station end
     const loco = V.availableModels(1950, "locomotive").sort((a, b) => a.price - b.price)[0], wag = V.availableModels(1950, "wagon").find(w => w.cargo === "passengers");
     const tm = V.buildTrainModel(loco.id, wag.id, 2); eq(trainLen(tm), 2, "a three-unit train is two tiles long");
     const A = makeVehicle("player", tm.id, { x: X + 1, y: Y }, [west.id, east.id]); A.dir = { dx: 1, dy: 0 };
@@ -229,7 +229,9 @@ const TESTS = [
     S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const r1 = cycleSignal(a.x + 1, a.y); assert(r1.ok && !r1.signal.two && r1.signal.dx === 1, "one-way east");
     const r2 = cycleSignal(a.x + 1, a.y); assert(r2.signal.dx === -1, "turned round"); const r3 = cycleSignal(a.x + 1, a.y); assert(r3.signal.two, "two-way");
-    const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && !r4.signal && !S.signals[key(a.x + 1, a.y)], "removed");
+    const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && r4.signal.path, "path signal");
+    const r5 = cycleSignal(a.x + 1, a.y); assert(r5.signal.path && r5.signal.dx === -1, "path turned round");
+    const r6 = cycleSignal(a.x + 1, a.y); assert(r6.ok && !r6.signal && !S.signals[key(a.x + 1, a.y)], "removed");
     buildTrackTile(a.x + 2, a.y + 1); assert(!cycleSignal(a.x + 2, a.y).ok, "no signal on a junction");
   }],
   ["rail", "Longer stations: platforms join, catchment grows, trains load faster", () => {
@@ -620,6 +622,86 @@ const TESTS = [
     key("f"); assert(openWins.fleet, "F opens Fleet"); key("Escape"); assert(!openWins.fleet, "Esc closes it");
     key("?"); assert(openWins.help, "help window"); closeAllWins();
     key("2"); eq(ui.speed, 2); key("1"); eq(ui.speed, 1);
+  }],
+  ["rail", "Block signals wait for the whole block; path signals only for the route", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 900000; const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 4; y < S.map.h - 6 && !a; y++) for (let x = 3; x < S.map.w - 14 && !a; x++) { let ok = true; for (let dy = -1; dy <= 3 && ok; dy++) for (let dx = 0; dx <= 11 && ok; dx++) if (!free(x + dx, y + dy)) ok = false; if (ok) a = { x, y }; }
+    assert(a, "room"); for (let k = 0; k <= 10; k++) buildTrackTile(a.x + k, a.y);
+    for (let k = 1; k <= 3; k++) buildTrackTile(a.x + 6, a.y + k);                         // a siding off the block
+    const st = placeStation(a.x + 10, a.y, "trainStation", "player").station;
+    S.signals[key(a.x + 2, a.y)] = { dx: 1, dy: 0, two: false };
+    const tm = V.buildTrainModel(V.availableModels(1950, "locomotive")[0].id, V.availableModels(1950, "wagon")[0].id, 1);
+    const B = makeVehicle("player", tm.id, { x: a.x + 6, y: a.y + 3 }, []); R.res.set(key(a.x + 6, a.y + 3), B.id);   // parked on the siding
+    const A = makeVehicle("player", tm.id, { x: a.x + 2, y: a.y }, [st.id]); A.dir = { dx: 1, dy: 0 }; A.trail = [{ x: a.x + 2, y: a.y }];
+    const goal = goalTiles({ kind: "stop", id: st.id });
+    assert(!reserveAhead(A, goal), "block signal stays red while the siding in its block is taken");
+    S.signals[key(a.x + 2, a.y)].path = true;
+    assert(reserveAhead(A, goal), "path signal lets the train through: its route does not touch the siding");
+  }],
+  ["air", "Planes with an engine fault land at the nearest airport", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 16, rivals: 0, startYear: 1960, seed }); d = buildDemoAir(); if (d.ok) break; }
+    assert(d && d.ok, "airports"); const v = d.vh; assert(v.core.breakdownsEnabled, "aircraft can break down on medium");
+    for (let k = 0; k < 60 && v.state !== "moving"; k++) simulateDays(0.5);
+    assert(v.state === "moving", "in the air"); aircraftEmergency(v);
+    assert(v.emergency && OR.currentOrder(v.orders).kind === "depot", "heading for a hangar"); assert(S.news.items.some(n => /engine fault/.test(n.text)), "news");
+    for (let k = 0; k < 60 && v.emergency; k++) simulateDays(1);
+    assert(!v.emergency, "landed and repaired"); const t = v.trips || 0; simulateDays(60); assert((v.trips || 0) > t, "back on its route");
+  }],
+  ["rivals", "Rivals start tanker and air routes", () => {
+    let rv = null, ok = false;
+    for (const seed of ["11", "12", "13", "14", "15", "16", "17", "18"]) {
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, startYear: 1960, seed, water: 0.85 });
+      rv = S.rivals[0]; rv.ai.cash = 5e6; const keep = rng;
+      for (let k = 0; k < 80 && !((rv.sea || 0) && (rv.air || 0)); k++) rivalSeaAirMonth(rv);
+      if ((rv.sea || 0) && (rv.air || 0)) { ok = true; break; }
+    }
+    assert(ok, "a rival opened a sea route and an air route");
+    const fleet = S.vehicles.filter(v => v.owner === rv.ai.id);
+    assert(fleet.some(isShip) && fleet.some(isAir), "rival owns a ship and a plane");
+    const dock = S.stations.find(s => s.kind === "dock" && s.owner === rv.ai.id); assert(dock && !bulldoze(dock.x, dock.y).ok, "player cannot bulldoze a rival dock");
+    simulateDays(200); assert(fleet.find(isAir).trips > 0, "rival plane flies");
+  }],
+  ["online", "Cloud saves: save, list, load and delete (in-memory test store)", () => {
+    // a small stand-in for the db capability with the calls the game uses
+    const store = new Map();
+    const docRef = (path) => ({ path, async get() { const d = store.get(path); return { id: path.split("/").pop(), exists: !!d, data: () => d }; }, async set(v) { store.set(path, JSON.parse(JSON.stringify(v))); }, async delete() { store.delete(path); }, collection: (c) => colRef(path + "/" + c) });
+    const colRef = (path) => ({ doc: (id) => docRef(path + "/" + id), async get() { const n = path.split("/").length + 1; return { docs: [...store.keys()].filter(k => k.startsWith(path + "/") && k.split("/").length === n).map(k => ({ id: k.split("/").pop(), exists: true, data: () => store.get(k) })) }; } });
+    const db = { collection: colRef, doc: docRef };
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 1950, seed: "cloud" });
+    const p = (async () => {
+      const keep = CHUNK; CHUNK = 20000; const id = await cloudSave("Cloud test", db, "u1"); CHUNK = keep;
+      const list = await cloudList(db, "u1"); eq(list.length, 1, "listed"); eq(list[0].name, "Cloud test");
+      assert(list[0].chunks >= 2, "a big map is stored in pieces: " + list[0].chunks);
+      const date = JSON.stringify(S.date); simulateDays(30);
+      assert(importSaveText(await cloudLoadText(id, db, "u1")), "loaded"); eq(JSON.stringify(S.date), date, "same date as saved");
+      await cloudDelete(id, db, "u1"); eq((await cloudList(db, "u1")).length, 0, "deleted"); eq(store.size, 0, "pieces deleted too");
+    })();
+    window.__asyncTests = (window.__asyncTests || []).concat([p]);
+  }],
+  ["online", "Online race: host starts, players get the same map, league table sorts by value", () => {
+    // stand-in room: two pages share one presence list
+    const peers = new Map(); let listeners = [];
+    const mk = (peer, me) => ({ name: "", async presence(patch) { const old = peers.get(peer) || { peer, sameTab: me, kind: "viewer", presence: {} }; peers.set(peer, { ...old, presence: { ...old.presence, ...patch } }); listeners.forEach(f => f({ peers: [...peers.values()] })); }, peers: () => [...peers.values()], onPeers(f) { listeners.push(f); return () => {}; }, leave() {} });
+    const room = { join: async () => mk("me", true) };
+    const p = (async () => {
+      menuState.seed = "race-seed"; menuState.size = 64; menuState.towns = 8; menuState.rivals = 0;
+      const r = await joinRace("abc12", "Hosting Co", true, raceCfg(), room); assert(r.ok, r.reason);
+      await startRace(); assert(S.race && S.race.code === "abc12", "host started"); eq(S.map.seed, "race-seed", "race map");
+      eq(S.retireYear, S.startYear + 20, "race lasts 20 years");
+      peers.set("other", { peer: "other", sameTab: false, kind: "viewer", presence: { name: "Rival Co", role: "player", state: "started", value: 9e9, year: 1952, month: 3 } });
+      ONLINE.peers = [...peers.values()]; ONLINE.last = 0; racePulse(1e12);
+      await new Promise(res => setTimeout(res, 0));
+      const t = raceTable(); eq(t[0].name, "Rival Co", "richest first"); assert(t.some(x => x.me), "me in the table");
+      raceWindow(); assert(document.querySelector(".win[data-id=race]").textContent.includes("Rival Co"), "race window"); closeAllWins();
+      // a player waiting in the lobby starts when the host does
+      ONLINE.host = false; ONLINE.started = false; startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "other" });
+      ONLINE.peers = [{ peer: "h", sameTab: false, kind: "viewer", presence: { role: "host", state: "started", cfg: { climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "host-seed" } } }];
+      raceWatch(); eq(S.map.seed, "host-seed", "player follows the host's map"); closeAllWins();
+      ONLINE.race = null; ONLINE.peers = []; ONLINE.started = false;
+    })();
+    window.__asyncTests = (window.__asyncTests || []).concat([p]);
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

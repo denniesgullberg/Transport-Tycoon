@@ -17,7 +17,15 @@ const errors = [];
 tab.on("pageerror", (e) => errors.push(e.message));
 await tab.goto("file://" + file);
 await tab.waitForTimeout(500);
-const results = await tab.evaluate(() => window.__TT_DEBUG.runTests().map((r) => ({ ...r })));
+const results = await tab.evaluate(async () => {
+  const out = window.__TT_DEBUG.runTests().map((r) => ({ ...r }));
+  // tests that start async work register a promise; a rejection fails that test
+  const pend = window.__asyncTests || [];
+  const settled = await Promise.allSettled(pend);
+  settled.forEach((s, i) => out.push({ grp: "async", name: "async check " + (i + 1), ok: s.status === "fulfilled", err: s.status === "rejected" ? String(s.reason && s.reason.message || s.reason) : "", ms: 0 }));
+  window.__asyncTests = [];
+  return out;
+});
 await browser.close();
 
 for (const r of results) console.log((r.ok ? "PASS " : "FAIL ") + r.grp.padEnd(9) + r.name + (r.ok ? "" : "\n     " + r.err));

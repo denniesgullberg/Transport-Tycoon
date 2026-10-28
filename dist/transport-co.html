@@ -97,7 +97,7 @@ body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;r
   <div id="ticker" class="info" role="button"></div>
   <div id="tools"></div>
   <div id="bar">
-    <button id="bmenu" class="gb">Menu</button><button id="bshop" class="gb">Buy</button><button id="bfleet" class="gb">Fleet</button><button id="bfin" class="gb">Money</button><button id="bgraph" class="gb">Graphs</button><button id="bco" class="gb">Company</button><button id="bnews" class="gb">News</button><button id="bhelp" class="gb sq" aria-label="Keys and help">?</button>
+    <button id="bmenu" class="gb">Menu</button><button id="bshop" class="gb">Buy</button><button id="bfleet" class="gb">Fleet</button><button id="bfin" class="gb">Money</button><button id="bgraph" class="gb">Graphs</button><button id="bco" class="gb">Company</button><button id="bnews" class="gb">News</button><button id="brace" class="gb" hidden>Race</button><button id="bhelp" class="gb sq" aria-label="Keys and help">?</button>
     <span class="grow"></span><button id="bpause" class="gb sq">❚❚</button><button class="gb sq spd on" data-s="1">1×</button><button class="gb sq spd" data-s="2">2×</button><button class="gb sq spd" data-s="4">4×</button>
   </div>
   <div id="menu" hidden></div>
@@ -3467,7 +3467,7 @@ function buyVehicle(modelId, depot) {
   const pair = bestPair(m.cargo, near, stationKindFor(m), netFor(dk), m);
   spend("newVehicles", price);
   const vh = makeVehicle("player", modelId, depot, pair || []);
-  if (dk === "air") { vh.core.breakdownsEnabled = false; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
+  if (dk === "air") { vh.core.breakdownsEnabled = S.settings.breakdowns > 0; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
   sound.play("build");
   return { ok: true, vh, pair };
 }
@@ -3564,7 +3564,8 @@ function dock(vh, dest) {
 function dailyVehicle(vh) {
   const m = modelOf(vh); if (!m) return;
   const r = core.tickVehicleDay(vh.core, m, () => rng() / Math.max(0.01, S.settings.breakdowns || 1));
-  if (r === "broke") { vh.broken = true; if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", m.name + " has broken down.", { x: vh.tile.x, y: vh.tile.y }); sound.play("breakdown"); } }
+  if (r === "broke" && isAir(vh)) aircraftEmergency(vh);
+  else if (r === "broke") { vh.broken = true; if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", m.name + " has broken down.", { x: vh.tile.x, y: vh.tile.y }); sound.play("breakdown"); } }
   else if (r === "ok") vh.broken = false;
   if (vh.stopped) return;   // stopped vehicles cost nothing to run and do not load
   if (vh.owner === "player") {
@@ -3691,6 +3692,7 @@ function monthlyTick() {
     const log = AI.tickAiMonth(rv.ai, aiApi(rv), ends, S.date.year, rng);
     for (const line of log) EV.addNews(S.news, S.date, "info", line);
     rivalRailMonth(rv);
+    rivalSeaAirMonth(rv);
   }
   let inc = 0, exp = 0; for (const k of Object.keys(S.acc)) { if (S.acc[k] > 0) inc += S.acc[k]; else exp -= S.acc[k]; }
   monthIncomeTrack(inc, exp);
@@ -3952,16 +3954,32 @@ function cycleSignal(x, y) {
   const ax = trackAxis(x, y); if (!ax) return { ok: false, reason: "Put signals on straight track, not on a junction." };
   const [d1, d2] = ax === "x" ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
   const cur = S.signals[k];
-  let next;
-  if (!cur) next = { dx: d1[0], dy: d1[1], two: false };
-  else if (!cur.two && cur.dx === d1[0] && cur.dy === d1[1]) next = { dx: d2[0], dy: d2[1], two: false };
-  else if (!cur.two) next = { dx: d1[0], dy: d1[1], two: true };
-  else next = null;
+  // Block one way, turned round, two-way block, path one way, path turned round, then off.
+  const cycle = [
+    { dx: d1[0], dy: d1[1], two: false }, { dx: d2[0], dy: d2[1], two: false }, { dx: d1[0], dy: d1[1], two: true },
+    { dx: d1[0], dy: d1[1], two: false, path: true }, { dx: d2[0], dy: d2[1], two: false, path: true },
+  ];
+  const at = cur ? cycle.findIndex(c => c.dx === cur.dx && c.dy === cur.dy && !!c.two === !!cur.two && !!c.path === !!cur.path) : -1;
+  const next = at + 1 < cycle.length ? cycle[at + 1] : null;
   if (next && !cur) { const c = cost(SIGNAL_COST); if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   if (next) S.signals[k] = next; else delete S.signals[k];
   return { ok: true, signal: next, cost: next && !cur ? cost(SIGNAL_COST) : 0 };
 }
-function signalText(sg) { if (!sg) return "Signal removed."; return sg.two ? "Two-way signal: trains stop here in both directions." : "One-way signal: trains pass only one way and stop here for the block ahead."; }
+function signalText(sg) {
+  if (!sg) return "Signal removed.";
+  if (sg.path) return "Path signal: a train goes on as soon as its own route is clear, even if another train is elsewhere in the block.";
+  return sg.two ? "Two-way block signal: trains stop here both ways until the whole block ahead is empty." : "One-way block signal: trains pass one way only, and wait until the whole block ahead is empty.";
+}
+// Every track tile in the block that starts at `first`, entered from `from`. A block ends at the next signal.
+function blockTiles(first, from) {
+  const W = S.map.w, start = tk(first), stop = tk(from), seen = new Set([start]), q = [start];
+  while (q.length && seen.size < 600) {
+    const k = q.pop(); if (k !== start && signalAt(k)) continue;   // signal tiles close the block
+    const x = k % W, y = (k / W) | 0;
+    for (const [dx, dy] of DIR4) { const nx = x + dx, ny = y + dy, nk = ny * W + nx; if (nk === stop || seen.has(nk) || !inB(nx, ny) || !R.rail.hasRoad(nx, ny)) continue; seen.add(nk); q.push(nk); }
+  }
+  return [...seen];
+}
 
 // ---- pathfinding over track. Returns the tiles after `start` up to the first goal tile.
 function railPath(start, goals, opt) {
@@ -4028,6 +4046,11 @@ function reserveAhead(vh, goals) {
     prev = t;
   }
   if (!block.every(t => railFree(t, vh.id))) return false;     // red signal: wait
+  // Waiting at a block signal: the whole block ahead must be empty, not just this route.
+  const here = signalAt(tk(vh.tile)), d0 = { dx: path[0].x - vh.tile.x, dy: path[0].y - vh.tile.y };
+  if (here && !here.path && (here.two || (here.dx === d0.dx && here.dy === d0.dy))) {
+    for (const k of blockTiles(path[0], vh.tile)) { const o = R.res.get(k); if (o && o !== vh.id && !railDepotAt(k)) return false; }
+  }
   for (const t of block) claim(t, vh.id);
   vh.res = block;
   return true;
@@ -4166,13 +4189,14 @@ function placeDock(x, y, owner) {
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);
   return { ok: true, station: s, cost: c, tile: { x, y } };
 }
-function placeShipyard(x, y) {
+function placeShipyard(x, y, owner) {
+  owner = owner || "player";
   const i = key(x, y), m = S.map;
   if (!inB(x, y) || !m.water[i] || m.occupied[i]) return { ok: false, reason: "Build a shipyard on open water next to the shore." };
   if (!landNeighbour(x, y)) return { ok: false, reason: "A shipyard must touch the shore." };
-  const c = cost(3500); if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
-  spend("construction", c);
-  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + " Shipyard", x, y, kind: "ship", owner: "player" };
+  const c = cost(3500);
+  if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + " Shipyard", x, y, kind: "ship", owner };
   S.depots.push(d); R.depotAt.set(i, d); m.occupied[i] = 1;
   return { ok: true, depot: d, cost: c };
 }
@@ -4210,7 +4234,7 @@ function airStep(vh) {
   const st = dest.kind === "stop" ? stationById(dest.id) : stationById((depotById(dest.id) || {}).airport);
   if (!st) { vh.state = "idle"; return; }
   if (vh.at === st.id) {
-    if (dest.kind === "depot") { if (OR.arrive(vh.orders, { kind: "depot", id: dest.id })) { dock(vh, dest); return; } }
+    if (dest.kind === "depot") { if (OR.arrive(vh.orders, { kind: "depot", id: dest.id })) { vh.emergency = false; dock(vh, dest); return; } }
     else if (OR.arrive(vh.orders, { kind: "stop", id: st.id })) { core.serviceVehicle(vh.core, modelOf(vh)); dock(vh, dest); return; }
   }
   const c = airportCentre(st), here = vh.pos || { x: vh.tile.x, y: vh.tile.y };
@@ -4218,9 +4242,21 @@ function airStep(vh) {
   vh.flightLen = Math.max(1, Math.hypot(c.x - here.x, c.y - here.y));
   vh.dir = { dx: Math.sign(Math.round(c.x - here.x)), dy: Math.sign(Math.round(c.y - here.y)) };
 }
+// A plane that breaks down does not stop in the air: it slows and lands at the nearest airport.
+function aircraftEmergency(vh) {
+  const here = vh.state === "moving" ? { x: vh.from.x + (vh.to.x - vh.from.x) * vh.p, y: vh.from.y + (vh.to.y - vh.from.y) * vh.p } : (vh.pos || vh.tile);
+  let best = null, bd = 1e9;
+  for (const s of S.stations) if (s.kind === "airport" && s.owner === vh.owner && canUseStation(modelOf(vh), s)) { const c = airportCentre(s), d = Math.hypot(c.x - here.x, c.y - here.y); if (d < bd) { bd = d; best = s; } }
+  if (!best) return;
+  const hangar = S.depots.find(d => d.airport === best.id); if (!hangar) return;
+  vh.orders.orders.splice(vh.orders.current, 0, { kind: "depot", depotId: hangar.id, temp: true }); vh.orders.phase = "travelling";
+  vh.emergency = true; vh.broken = false;
+  if (vh.state === "moving") { vh.pos = here; vh.tile = { x: Math.round(here.x), y: Math.round(here.y) }; vh.state = "idle"; vh.at = null; airStep(vh); }
+  if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", modelOf(vh).name + " #" + vh.id.slice(1) + " has an engine fault and is landing at " + best.name + ".", { x: best.x, y: best.y }); sound.play("breakdown"); }
+}
 function airMove(vh, dtDays) {
   const m = modelOf(vh); if (!m) return;
-  vh.p += dtDays * (m.speedKmh / 40) / vh.flightLen;
+  vh.p += dtDays * (m.speedKmh / 40) * (vh.emergency ? 0.5 : 1) / vh.flightLen;
   if (vh.p >= 1) { vh.pos = { x: vh.to.x, y: vh.to.y }; vh.tile = { x: Math.round(vh.to.x), y: Math.round(vh.to.y) }; vh.from = vh.to; vh.p = 0; vh.state = "idle"; vh.at = vh.goal; tryStep(vh); }
 }
 
@@ -4456,6 +4492,7 @@ function drawTrack(px, py, x, y, crossing) {
     ctx.fillStyle = "#222"; ctx.fillRect(px + ox - 3, py + oy - 19, 6, 7);
     ctx.fillStyle = free ? "#3ddc5a" : "#ff3b30"; ctx.beginPath(); ctx.arc(px + ox, py + oy - 15.5, 2, 0, 7); ctx.fill();
     if (sg.two) { ctx.fillStyle = "#fff"; ctx.fillRect(px + ox - 3, py + oy - 21, 6, 2); }
+    if (sg.path) { ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(px + ox - 3, py + oy - 19); ctx.lineTo(px + ox + 3, py + oy - 19); ctx.lineTo(px + ox, py + oy - 23); ctx.fill(); }
   }
 }
 function drawStation(px, py, s, x, y) {
@@ -4596,7 +4633,8 @@ function drawVehicle(v, pos) {
     return;
   }
   const k = isTrain(v) ? Math.min(0.3, 66 / img.naturalWidth) : 0.3, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy);
+  const lk = isShip(v) ? null : (modelOf(v) || {}).look;
+  isoSprite(img, pos.x, pos.y + 2, w, h, v.dir.dx || v.dir.dy ? v.dir.dx : 1, v.dir.dy, lk);
   if (v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(pos.x, pos.y - 20, 4, 0, 7); ctx.fill(); }
   else if (v.loaded > 0 && view.z > 1.2) { ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fillRect(pos.x - 3, pos.y - 20, 6, 3); }
 }
@@ -4631,7 +4669,7 @@ function trainUnits(v) {
 function drawUnit(v, u) {
   const img = spriteFor(u.id); if (!img) return;
   const k = (u.loco ? 17 : 15) / img.naturalWidth, w = img.naturalWidth * k, h = img.naturalHeight * k;
-  isoSprite(img, u.x, u.y + 2, w, h, u.dx || u.dy ? u.dx : 1, u.dy || 0);
+  isoSprite(img, u.x, u.y + 2, w, h, u.dx || u.dy ? u.dx : 1, u.dy || 0, (V.getModel(u.id) || {}).look);
   if (u.loco && v.broken) { ctx.fillStyle = "rgba(220,60,40,.9)"; ctx.beginPath(); ctx.arc(u.x, u.y - 16, 4, 0, 7); ctx.fill(); }
   else if (u.loco && v.red && view.z > 1) { ctx.fillStyle = "rgba(255,60,40,.9)"; ctx.fillRect(u.x - 2, u.y - 18, 4, 4); }
 }
@@ -4681,7 +4719,7 @@ const TOOLS = [
   ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
   ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile. Trains are built and serviced here."],
-  ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Tap again to turn it round, again for two-way, again to remove. A train only enters the next block when it is empty."],
+  ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Each tap changes it: block one way, turned round, two-way, path signal one way, turned round, off."],
   ["electrify", "Electrify", () => "Electrify: " + money(cost(ELEC_COST)) + " per tile. Drag over track. Electric locomotives only run on electrified track."],
   ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap a shore tile next to open water. Ships load and unload here."],
   ["shipyard", "Shipyard", () => "Shipyard: " + money(cost(3500)) + ". Tap open water next to the shore. Ships are built here."],
@@ -5017,7 +5055,7 @@ function companyWin() {
       const m = metricsNow();
       let h = "<div class='big'>" + r.total + " <small>/ 1000</small></div><p><b>" + r.title + "</b></p><div class='scroll'><table class='tb'>" + r.parts.map(p => "<tr><td>" + p.label + "</td><td>" + p.score + " / " + p.max + "</td></tr>").join("") + "</table></div>";
       h += "<h4>Objectives</h4>" + S.objectives.map(ob => { const pr = Math.round(EV.progress(ob, m) * 100); return "<div class='obj " + ob.status + "'><div>" + ob.title + (ob.deadlineYear ? " <span class='dim'>by " + ob.deadlineYear + "</span>" : "") + (ob.status !== "active" ? " <b>(" + ob.status + ")</b>" : "") + "</div><div class='bar'><i style='width:" + pr + "%'></i></div></div>"; }).join("");
-      h += "<h4>Companies</h4><table class='tb'><tr><th>Company</th><th>Cash</th><th>Routes</th></tr><tr><td><b>" + S.name + "</b></td><td>" + money(S.company.cash) + "</td><td>" + new Set(pv.map(v => v.orders.orders.map(o => o.stationId).join(">"))).size + "</td></tr>" + S.rivals.map(rv => "<tr><td style='color:" + rv.color + "'><b>" + rv.ai.name + "</b>" + (rv.ai.bankrupt ? " (bankrupt)" : "") + "</td><td>" + money(rv.ai.cash) + "</td><td>" + (rv.ai.routes.length + (rv.rail ? rv.rail.length : 0)) + "</td></tr>").join("") + "</table>";
+      h += "<h4>Companies</h4><table class='tb'><tr><th>Company</th><th>Cash</th><th>Routes</th></tr><tr><td><b>" + S.name + "</b></td><td>" + money(S.company.cash) + "</td><td>" + new Set(pv.map(v => v.orders.orders.map(o => o.stationId).join(">"))).size + "</td></tr>" + S.rivals.map(rv => "<tr><td style='color:" + rv.color + "'><b>" + rv.ai.name + "</b>" + (rv.ai.bankrupt ? " (bankrupt)" : "") + "</td><td>" + money(rv.ai.cash) + "</td><td>" + (rv.ai.routes.length + (rv.rail ? rv.rail.length : 0) + (rv.sea || 0) + (rv.air || 0)) + "</td></tr>").join("") + "</table>";
       if (S.rivals.length) h += "<h4>Shares</h4>" + S.rivals.map((rv, i) => "<div class='sh'><div class='kv'><span>" + rv.ai.name + "</span><b>You own " + ((rv.shares || 0) * 25) + "% · " + money(sharePrice(rv)) + " per 25%</b></div><div class='row'><button class='gb sm' data-buy='" + i + "'" + (rv.ai.bankrupt ? " disabled" : "") + ">Buy 25%</button><button class='gb sm' data-sell='" + i + "'" + (rv.shares ? "" : " disabled") + ">Sell 25%</button></div></div>").join("") + "<p class='dim small'>Owning 100% takes the company over: its vehicles, stations and cash become yours.</p>";
       body.innerHTML = h;
     };
@@ -5368,8 +5406,9 @@ function savesWin() {
       h += list.length ? "<div class='saves'>" + list.map(sv => "<div class='sv'><div class='svn'><b>" + esc(sv.slot === AUTO ? "Autosave" : sv.label.split(" · ")[0]) + "</b><span class='dim'>" + esc(sv.label.split(" · ")[1] || "") + " · saved " + when(sv.savedAt) + "</span></div><div class='row'>" +
         "<button data-a='load' data-s='" + esc(sv.slot) + "'>Load</button>" + (live && sv.slot !== AUTO ? "<button data-a='over' data-s='" + esc(sv.slot) + "'>Overwrite</button>" : "") +
         "<button data-a='del' data-s='" + esc(sv.slot) + "' class='" + (armed === sv.slot ? "armed" : "") + "'>" + (armed === sv.slot ? "Tap again to delete" : "Delete") + "</button></div></div>").join("") + "</div>" : "<p class='dim'>No saved games yet.</p>";
-      h += "<h4>Files</h4><div class='row'>" + (live ? "<button class='gb sm' data-a='export'>Export to file</button>" : "") + "<button class='gb sm' data-a='import'>Import a save file</button></div>";
+      h += "<h4>Files</h4><div class='row'>" + (live ? "<button class='gb sm' data-a='export'>Export to file</button>" : "") + "<button class='gb sm' data-a='import'>Import a save file</button></div><div class='cloudbox'></div>";
       body.innerHTML = h;
+      cloudSection(body.querySelector(".cloudbox"));
     }
     body.onclick = e => {
       const b = e.target.closest("button"); if (!b || !b.dataset.a) return; const a = b.dataset.a, slot = b.dataset.s;
@@ -5395,9 +5434,26 @@ const ELECTRIC_LOCO = /^(Volt|Arc|Meridian|Tempest)/;
 // Draw a side-view sprite so it lines up with the isometric road or track it is on.
 // Moving along +x the vehicle heads down-right, along +y down-left; the shear keeps
 // its wheels on the ground line, which gives four distinct directions.
-function isoSprite(img, x, y, w, h, dx, dy) {
+// With a `look` the vehicle also gets a roof and the end face the camera can see (its
+// front when it drives towards you, its back when it drives away), so it reads as a solid body.
+function isoSprite(img, x, y, w, h, dx, dy, look) {
   const vx = (dx - dy), vy = (dx + dy) * 0.5;               // screen direction, before scaling
   const sx = vx < 0 ? -1 : 1, shear = vx === 0 ? 0 : vy / Math.abs(vx);
+  if (look) {
+    // local sprite x maps to screen (sx*x, shear*x); the body is about this deep, away from the camera
+    const depth = h * 0.3, along = dx !== 0 ? [0, -1] : [-1, 0];   // the hidden side faces -y or -x
+    const ddx = (along[0] - along[1]) * (TW / 2) / 20 * depth * 0.5, ddy = (along[0] + along[1]) * (TH / 2) / 20 * depth * 0.5;
+    const top = -h * 0.38, bot = -h * 0.06, half = w * 0.44;
+    const P = (lx, ly) => [x + sx * lx, y + shear * lx + ly];
+    const towardsCamera = vy > 0, endX = (dx + dy) > 0 ? half : -half;   // the end with larger screen y is the one we see
+    const roof = [P(-half, top), P(half, top)];
+    ctx.fillStyle = shade(look.roof || look.body, 1.15);
+    ctx.beginPath(); ctx.moveTo(roof[0][0], roof[0][1]); ctx.lineTo(roof[1][0], roof[1][1]); ctx.lineTo(roof[1][0] + ddx, roof[1][1] + ddy); ctx.lineTo(roof[0][0] + ddx, roof[0][1] + ddy); ctx.closePath(); ctx.fill();
+    const e1 = P(endX, top), e2 = P(endX, bot);
+    ctx.fillStyle = shade(look.body, towardsCamera ? 0.92 : 0.7);
+    ctx.beginPath(); ctx.moveTo(e1[0], e1[1]); ctx.lineTo(e2[0], e2[1]); ctx.lineTo(e2[0] + ddx, e2[1] + ddy); ctx.lineTo(e1[0] + ddx, e1[1] + ddy); ctx.closePath(); ctx.fill();
+    if (towardsCamera) { const g1 = P(endX, top + (bot - top) * 0.15), g2 = P(endX, top + (bot - top) * 0.5); ctx.fillStyle = "rgba(191,227,255,.9)"; ctx.beginPath(); ctx.moveTo(g1[0] + ddx * 0.15, g1[1] + ddy * 0.15); ctx.lineTo(g2[0] + ddx * 0.15, g2[1] + ddy * 0.15); ctx.lineTo(g2[0] + ddx * 0.85, g2[1] + ddy * 0.85); ctx.lineTo(g1[0] + ddx * 0.85, g1[1] + ddy * 0.85); ctx.closePath(); ctx.fill(); }
+  }
   ctx.save(); ctx.transform(sx, shear, 0, 1, x, y);
   ctx.drawImage(img, -w / 2, -h * 0.82, w, h);
   ctx.restore();
@@ -5684,6 +5740,18 @@ function rivalRailMonth(rv) {
   for (const s of S.stations) if (s.owner === "player" && ST.covers(s, ends.from.x, ends.from.y) && s.served[cargo]) { EV.addNews(S.news, S.date, "bad", ai.name + " now competes with you for " + cargo + " at " + ends.from.name + ".", { x: ends.from.x, y: ends.from.y }); break; }
 }
 
+// Rivals also open oil tanker routes from rigs and air routes between big towns.
+function rivalSeaAirMonth(rv) {
+  const ai = rv.ai; if (ai.bankrupt || ai.cash < 200000 || rng() > 0.15) return;
+  rv.sea = rv.sea || 0; rv.air = rv.air || 0;
+  if (rv.sea < 2 && S.map.industries.some(i => i.kind === "oilRig")) {
+    const r = buildDemoShip(ai.id, rv); if (r.ok) { rv.sea++; EV.addNews(S.news, S.date, "info", ai.name + " started an oil tanker service from " + r.rig.name + ".", { x: r.dock.x, y: r.dock.y }); return; }
+  }
+  if (rv.air < 2 && S.date.year >= 1955) {
+    const r = buildDemoAir(ai.id, rv); if (r.ok) { rv.air++; EV.addNews(S.news, S.date, "info", ai.name + " opened an air route from " + r.a.name + " to " + r.b.name + ".", { x: r.a.x, y: r.a.y }); }
+  }
+}
+
 // ---------------------------------------------------------- prices and inflation
 function vehiclePrice(m) { return Math.round(m.price * (S ? S.inflation : 1)); }
 function saleValue(vh) { return Math.round(core.vehicleSalePrice(vh.core, modelOf(vh)) * S.inflation); }
@@ -5907,6 +5975,159 @@ function setupDesktop() {
   cv.addEventListener("contextmenu", e => { e.preventDefault(); setTool("inspect"); });
 }
 
+// ------------------------------------------------------------------ online
+// Cloud saves (kept in your Claude account, private to you) and online races (everyone
+// plays the same map at the same time and sees a live league table). Both only work when
+// the game is opened in Claude; on its own the page plays exactly as before.
+const CLOUD = { db: null, uid: null, ready: false };
+const ONLINE = { room: null, race: null, peers: [], unsub: null, last: 0, started: false };
+let CHUNK = 180000;   // characters per stored piece; each piece stays well under the 256 KiB document limit
+
+async function initOnline() {
+  if (!window.claude || !window.claude.use) return;
+  try {
+    const [db, user, room] = await Promise.all([window.claude.use("db"), window.claude.use("user"), window.claude.use("room")]);
+    if (db && user) { const uid = await user.id(); if (uid) { CLOUD.db = db; CLOUD.uid = uid; CLOUD.ready = true; } }
+    if (room) ONLINE.room = room;
+  } catch (e) { /* the game works without these */ }
+}
+
+// ---- cloud saves: one small document per save plus its pieces underneath
+function cloudCol(db, uid) { return db.collection("data/users/" + uid); }
+async function cloudSave(name, db, uid) {
+  db = db || CLOUD.db; uid = uid || CLOUD.uid; if (!db || !uid) throw new Error("Cloud saves are not available here.");
+  syncPersist();
+  const label = saveLabel(name), text = SV.serialize(S, label), id = "save-" + Date.now(), n = Math.ceil(text.length / CHUNK);
+  const meta = cloudCol(db, uid).doc(id);
+  for (let i = 0; i < n; i++) await meta.collection("chunks").doc(String(i)).set({ t: text.slice(i * CHUNK, (i + 1) * CHUNK) });
+  await meta.set({ name: (name || S.name).slice(0, 40), label, savedAt: Date.now(), chunks: n, size: text.length });
+  return id;
+}
+async function cloudList(db, uid) {
+  db = db || CLOUD.db; uid = uid || CLOUD.uid; if (!db || !uid) return [];
+  const q = await cloudCol(db, uid).get();
+  return q.docs.filter(d => d.exists && /^save-/.test(d.id)).map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.savedAt - a.savedAt);
+}
+async function cloudLoadText(id, db, uid) {
+  db = db || CLOUD.db; uid = uid || CLOUD.uid;
+  const meta = cloudCol(db, uid).doc(id), m = await meta.get(); if (!m.exists) throw new Error("That save is gone.");
+  let text = ""; const n = m.data().chunks;
+  for (let i = 0; i < n; i++) { const c = await meta.collection("chunks").doc(String(i)).get(); if (!c.exists) throw new Error("Part of that save is missing."); text += c.data().t; }
+  return text;
+}
+async function cloudDelete(id, db, uid) {
+  db = db || CLOUD.db; uid = uid || CLOUD.uid;
+  const meta = cloudCol(db, uid).doc(id), m = await meta.get(); const n = m.exists ? m.data().chunks : 0;
+  for (let i = 0; i < n; i++) await meta.collection("chunks").doc(String(i)).delete();
+  await meta.delete();
+}
+function cloudSection(box) {
+  if (!CLOUD.ready) { box.innerHTML = "<h4>Cloud saves</h4><p class='dim small'>Open the game in Claude while signed in to keep saves in your account and load them on any device.</p>"; return; }
+  let armed = null;
+  const render = async () => {
+    box.innerHTML = "<h4>Cloud saves</h4><p class='dim small'>Loading…</p>";
+    let list = [];
+    try { list = await cloudList(); } catch (e) { box.innerHTML = "<h4>Cloud saves</h4><p class='warn'>Could not reach your cloud saves.</p>"; return; }
+    const live = S && !ui.menuOpen;
+    box.innerHTML = "<h4>Cloud saves</h4>" + (live ? "<button class='gb sm' data-c='save'>Save to cloud</button>" : "") +
+      (list.length ? "<div class='saves'>" + list.map(s => "<div class='sv'><div class='svn'><b>" + esc(s.name) + "</b><span class='dim'>" + esc((s.label || "").split(" · ")[1] || "") + " · saved " + new Date(s.savedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) + "</span></div><div class='row'><button data-c='load' data-id='" + esc(s.id) + "'>Load</button><button data-c='del' data-id='" + esc(s.id) + "' class='" + (armed === s.id ? "armed" : "") + "'>" + (armed === s.id ? "Tap again to delete" : "Delete") + "</button></div></div>").join("") + "</div>" : "<p class='dim small'>No cloud saves yet.</p>");
+  };
+  box.onclick = async (e) => {
+    const b = e.target.closest("button[data-c]"); if (!b) return; const a = b.dataset.c, id = b.dataset.id;
+    b.disabled = true;
+    try {
+      if (a === "save") { await cloudSave(S.name); toast("Saved to the cloud."); armed = null; }
+      if (a === "load") { const text = await cloudLoadText(id); if (importSaveText(text)) toast("Cloud save loaded."); return; }
+      if (a === "del") { if (armed === id) { await cloudDelete(id); armed = null; toast("Deleted."); } else armed = id; }
+    } catch (err) { toast((err && err.code === "quota_exceeded") ? "Cloud storage is full. Delete an old save first." : (err && err.message) || "Cloud save failed.", true); }
+    render();
+  };
+  render();
+}
+
+// ---- online races
+// The host's presence carries the settings; when the host starts, every player starts the
+// same map. Each player's presence carries their company's numbers for the league table.
+function randomCode() { const a = "abcdefghjkmnpqrstuvwxyz23456789"; let s = ""; for (let i = 0; i < 5; i++) s += a[Math.floor(Math.random() * a.length)]; return s; }
+async function joinRace(code, name, host, cfg, room) {
+  room = room || ONLINE.room; if (!room) return { ok: false, reason: "Online races work when the game is opened in Claude and shared with the other players." };
+  code = String(code || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12); if (code.length < 3) return { ok: false, reason: "Use a race code of at least 3 letters." };
+  let r; try { r = await room.join("race-" + code); } catch (e) { return { ok: false, reason: e && e.code === "not_permitted" ? "Online races are not available for you here." : "Could not join that race. Try again." }; }
+  if (ONLINE.race && ONLINE.race !== r) { try { ONLINE.race.leave(); } catch (e) { /* ignore */ } }
+  ONLINE.race = r; ONLINE.code = code; ONLINE.host = !!host; ONLINE.name = (name || "Player").slice(0, 30); ONLINE.started = false;
+  await r.presence({ name: ONLINE.name, role: host ? "host" : "player", state: "lobby", cfg: host ? cfg : null });
+  if (ONLINE.unsub) ONLINE.unsub();
+  ONLINE.unsub = r.onPeers(ch => { ONLINE.peers = ch.peers; raceWatch(); if (openWins.race && openWins.race.refresh) openWins.race.refresh(); });
+  ONLINE.peers = r.peers();
+  return { ok: true, code };
+}
+function raceHost() { return ONLINE.peers.find(p => p.presence && p.presence.role === "host"); }
+// Players follow the host: when the host's race has started, start the same map.
+function raceWatch() {
+  if (ONLINE.host || ONLINE.started) return;
+  const h = raceHost(); if (!h || h.presence.state !== "started" || !h.presence.cfg) return;
+  ONLINE.started = true; startRaceGame(h.presence.cfg);
+  toast("The race has started!");
+}
+async function startRace() {
+  if (!ONLINE.race || !ONLINE.host) return { ok: false, reason: "Only the host starts the race." };
+  const me = ONLINE.peers.find(p => p.sameTab), cfg = me && me.presence.cfg;
+  const c = cfg || raceCfg();
+  ONLINE.started = true;
+  await ONLINE.race.presence({ state: "started", cfg: c, startedAt: Date.now() });
+  startRaceGame(c);
+  return { ok: true };
+}
+function raceCfg() {
+  return { climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed || String(mapgen.randomSeed()), retireYears: 20, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names };
+}
+function startRaceGame(cfg) {
+  startGame({ ...cfg, retireYears: cfg.retireYears || 20 });
+  S.name = ONLINE.name || S.name; S.race = { code: ONLINE.code };
+  $("#brace").hidden = false;
+  raceWindow();
+}
+// Send my numbers a few times a minute.
+function racePulse(now) {
+  if (!ONLINE.race || !S || !S.race || now - ONLINE.last < 3000) return;
+  ONLINE.last = now;
+  let rating = 0; try { rating = finalRating().total; } catch (e) { rating = 0; }
+  ONLINE.race.presence({ name: S.name, state: S.ended ? "done" : "started", value: companyValue(), cash: Math.round(S.company.cash), rating, year: S.date.year, month: S.date.month, vehicles: playerVehicles().length }).catch(() => {});
+}
+function raceTable() {
+  const rows = ONLINE.peers.filter(p => p.kind !== "agent" && p.presence && p.presence.name).map(p => ({ me: p.sameTab, name: String(p.presence.name), host: p.presence.role === "host", state: p.presence.state, value: +p.presence.value || 0, rating: +p.presence.rating || 0, year: p.presence.year, month: p.presence.month, vehicles: p.presence.vehicles || 0 }));
+  return rows.sort((a, b) => b.value - a.value);
+}
+function raceWindow() {
+  openWin("race", "Race " + (ONLINE.code || ""), (body, o) => {
+    o.refresh = () => {
+      const rows = raceTable(), end = S && S.retireYear;
+      let h = "<p class='dim small'>Everyone plays the same map. Highest company value when the race ends" + (end ? " in " + end : "") + " wins. Share the code <b>" + esc(ONLINE.code || "") + "</b> so others can join.</p>";
+      h += rows.length ? "<table class='tb'><tr><th>#</th><th>Company</th><th>Value</th><th>Date</th></tr>" + rows.map((r, i) => "<tr" + (r.me ? " class='sum'" : "") + "><td>" + (i + 1) + "</td><td>" + esc(r.name) + (r.me ? " (you)" : "") + (r.host ? " <span class='dim'>host</span>" : "") + "</td><td>" + money(r.value) + "</td><td>" + (r.year ? EV.MONTH_NAMES[r.month || 0].slice(0, 3) + " " + r.year : r.state === "lobby" ? "waiting" : "") + (r.state === "done" ? " ✓" : "") + "</td></tr>").join("") + "</table>" : "<p class='dim'>Nobody here yet.</p>";
+      if (ONLINE.host && !ONLINE.started) h += "<button class='gb wide' data-r='start'>Start the race for everyone</button>";
+      body.innerHTML = h;
+    };
+    body.onclick = async e => { if (e.target.dataset.r === "start") { const r = await startRace(); if (!r.ok) toast(r.reason, true); } };
+    o.refresh();
+  }, { live: 2000 });
+}
+function onlineView() {
+  if (!ONLINE.room) return "<p class='dim'>Online races work when this game is opened in Claude. Share it from the Share menu, then everyone opens it, joins the same race code and plays the same map.</p><p class='dim'>Cloud saves are under Saved games.</p>";
+  return "<label>Your company name</label><input id='on-name' maxlength='30' value='" + esc(ONLINE.name || "Oakwood Transport") + "' aria-label='Your company name'>" +
+    "<label>Race code</label><div class='row'><input id='on-code' maxlength='12' value='" + esc(ONLINE.code || randomCode()) + "' aria-label='Race code'><button class='gb sm' data-act='on-new'>New code</button></div>" +
+    "<p class='dim small'>The host's choices on the New game tab set the map. Races last 20 game years.</p>" +
+    "<div class='row'><button class='gb' data-act='on-host'>Host this race</button><button class='gb' data-act='on-join'>Join this race</button></div>";
+}
+async function onlineAction(a) {
+  const name = ($("#on-name") || {}).value || "Player", code = ($("#on-code") || {}).value || "";
+  if (a === "on-new") { const c = $("#on-code"); if (c) c.value = randomCode(); return; }
+  const host = a === "on-host";
+  const r = await joinRace(code, name, host, host ? raceCfg() : null);
+  if (!r.ok) return toast(r.reason, true);
+  hideMenu(); raceWindow(); $("#brace").hidden = false;
+  toast(host ? "Race " + r.code + " is open. Tap Start when everyone is in." : "Joined race " + r.code + ". Waiting for the host to start.");
+}
+
 // -------------------------------------------------------------- menus & loop
 const SLOT = "tt-save-1", AUTO = "tt-auto";
 function saveNow(slot) {
@@ -5926,6 +6147,7 @@ function afterStart() {
   const t = S.map.towns[0]; if (t) { view.z = 1.1; centerOn(t.x, t.y); }
   $("#gameover").hidden = true;
   ui.follow = null; MM.img = null; renderTutorial();
+  $("#brace").hidden = !(S && S.race);
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
@@ -5937,9 +6159,10 @@ function showMenu(first) {
   const anySave = savesList().length > 0;
   if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
   const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
-  const tabs = "<div class='tabs'>" + [["new", "New game"], ["sc", "Scenarios"], ["hs", "High scores"]].map(([v, l]) => "<button data-act='v-" + v + "' class='" + (menuState.view === v ? "on" : "") + "'>" + l + "</button>").join("") + "</div>";
+  const tabs = "<div class='tabs'>" + [["new", "New game"], ["sc", "Scenarios"], ["on", "Online"], ["hs", "High scores"]].map(([v, l]) => "<button data-act='v-" + v + "' class='" + (menuState.view === v ? "on" : "") + "'>" + l + "</button>").join("") + "</div>";
   let view;
   if (menuState.view === "sc") view = "<div class='scs'>" + SCENARIOS.map(sc => "<button class='sc' data-act='sc' data-id='" + sc.id + "'><b>" + sc.name + "</b><span>" + sc.blurb + "</span><span class='dim'>" + CLIM[sc.cfg.climate].label + " · " + sc.cfg.difficulty + " · from " + sc.cfg.startYear + "</span></button>").join("") + "</div>";
+  else if (menuState.view === "on") view = onlineView();
   else if (menuState.view === "hs") view = highScores().length ? "<table class='tb'>" + highScores().map((e, i) => "<tr><td>" + (i + 1) + ". " + esc(e.name) + (e.scenario ? " <span class='dim'>" + esc(e.scenario) + (e.won ? ", won" : "") + "</span>" : "") + "</td><td>" + e.score + " " + e.title + "</td><td>" + e.year + "</td></tr>").join("") + "</table>" : "<p class='dim'>No scores yet. Retire a company to set one.</p>";
   else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
@@ -5969,7 +6192,8 @@ function showMenu(first) {
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
-    if (a === "v-new" || a === "v-sc" || a === "v-hs") { menuState.view = a.slice(2); const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
+    if (a && a.startsWith("on-")) { onlineAction(a); return; }
+    if (a === "v-new" || a === "v-sc" || a === "v-hs" || a === "v-on") { menuState.view = a.slice(2); const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
     if (a === "sc") { startScenario(b.dataset.id); closeAllWins(); hideMenu(); afterStart(); }
     if (a === "import") pickSaveFile();
     if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
@@ -6006,6 +6230,7 @@ function wireBars() {
   $("#bco").onclick = companyWin;
   $("#bnews").onclick = newsWin;
   $("#bhelp").onclick = helpWin;
+  $("#brace").onclick = raceWindow;
   $("#ticker").onclick = () => { if (ui.jump) centerOn(ui.jump.x, ui.jump.y); else newsWin(); };
   $("#zin").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
   $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
@@ -6034,6 +6259,7 @@ function frame(now) {
     followTick();
     draw();
     drawMinimap(now);
+    racePulse(now);
     uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); tutorialTick(); if (S.gameOver) $("#gameover").hidden = false; }
   }
   requestAnimationFrame(frame);
@@ -6125,7 +6351,16 @@ function demoLine(mode, cargo, count, minDist) {
   centerOn(l.s1.x, l.s1.y); return { ok: true, line: l, vh: b.vh };
 }
 // Ships: oil from a rig to a refinery by tanker.
-function buildDemoShip() {
+// For the player (owner "player") the demo pays for itself; a rival company pays from its own cash.
+function rivalPays(rv, c) { if (!rv) return true; if (rv.ai.cash - c < 30000) return false; rv.ai.cash -= c; return true; }
+function rivalVehicle(rv, model, depot, stops) {
+  if (!rivalPays(rv, vehiclePrice(model))) return null;
+  const vh = makeVehicle(rv.ai.id, model.id, depot, stops); vh.core.breakdownsEnabled = false;
+  if (isAirModel(model)) { vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
+  return vh;
+}
+function buildDemoShip(owner, rv) {
+  owner = owner || "player";
   const m = S.map;
   for (const rig of m.industries.filter(i => i.kind === "oilRig")) {
     const rd = S.stations.find(s => s.rigId === rig.id); if (!rd) continue;
@@ -6137,13 +6372,16 @@ function buildDemoShip() {
         const w = waterNeighbour(x, y); if (w && R.sea.connected(w, rd.water)) dockAt = { x, y };
       }
       if (!dockAt) continue;
-      S.company.cash += 150000;
-      const d = placeDock(dockAt.x, dockAt.y); if (!d.ok) continue;
+      if (!rv) S.company.cash += 150000; else if (rv.ai.cash < cost(2400) + cost(3500) + 60000) return { ok: false, msg: "Not enough money." };
+      const d = placeDock(dockAt.x, dockAt.y, owner); if (!d.ok) continue;
+      if (rv) rivalPays(rv, cost(2400));
       let yard = null;
       for (let r = 1; r <= 6 && !yard; r++) for (let dy = -r; dy <= r && !yard; dy++) for (let dx = -r; dx <= r && !yard; dx++) { const x = d.station.water.x + dx, y = d.station.water.y + dy; if (inB(x, y) && m.water[key(x, y)] && !m.occupied[key(x, y)] && landNeighbour(x, y) && !sameT({ x, y }, d.station.water) && R.sea.connected({ x, y }, rd.water)) yard = { x, y }; }
       if (!yard) continue;
-      const sy = placeShipyard(yard.x, yard.y); if (!sy.ok) continue;
+      const sy = placeShipyard(yard.x, yard.y, owner); if (!sy.ok) continue;
+      if (rv) rivalPays(rv, cost(3500));
       const tanker = V.availableModels(S.date.year, "ship").filter(x => x.cargo === "oil").sort((a, b) => a.price - b.price)[0];
+      if (rv) { const vh = rivalVehicle(rv, tanker, sy.depot, [rd.id, d.station.id]); if (!vh) return { ok: false, msg: "Not enough money." }; vh.orders.orders[0].load = "full"; return { ok: true, vh, rig, ref, dock: d.station, rigDock: rd }; }
       const r = buyVehicle(tanker.id, sy.depot); if (!r.ok) return { ok: false, msg: r.msg };
       if (!r.vh.orders.orders.length) { addStopTo(r.vh, rd.id); addStopTo(r.vh, d.station.id); }
       r.vh.orders.orders[0].load = "full";
@@ -6153,17 +6391,20 @@ function buildDemoShip() {
   return { ok: false, msg: "No oil rig with a reachable refinery on this map." };
 }
 // Aircraft: a small airport by each of two towns and a propeller plane between them.
-function buildDemoAir() {
+function buildDemoAir(owner, rv) {
+  owner = owner || "player";
   const m = S.map, ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8);
   const spot = (t) => { for (let r = 2; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = t.x + dx, y = t.y + dy; let ok = true, h = null; for (let a = 0; a < 2 && ok; a++) for (let b = 0; b < 2 && ok; b++) { const i = key(x + b, y + a); if (!inB(x + b, y + a) || m.water[i] || m.occupied[i] || R.roads.hasRoad(x + b, y + a) || R.rail.hasRoad(x + b, y + a)) ok = false; else if (h === null) h = m.height[i]; else if (m.height[i] !== h) ok = false; } if (ok) return { x, y }; } return null; };
   for (const a of ts) for (const b of ts) {
     if (a === b || Math.hypot(a.x - b.x, a.y - b.y) < 20) continue;
     const sa = spot(a), sb = spot(b); if (!sa || !sb) continue;
-    S.company.cash += 150000;
-    const A = placeAirport(sa.x, sa.y, "small"), B = placeAirport(sb.x, sb.y, "small"); if (!A.ok || !B.ok) continue;
     const plane = V.availableModels(Math.max(S.date.year, 1955), "aircraft").filter(x => x.cargo === "passengers" && !isJet(x)).sort((p, q) => p.price - q.price)[0];
     if (!plane || plane.introYear > S.date.year) return { ok: false, msg: "No aircraft yet in " + S.date.year + "." };
+    if (!rv) S.company.cash += 150000; else if (rv.ai.cash < cost(AIRPORTS.small.cost) * 2 + vehiclePrice(plane) + 30000) return { ok: false, msg: "Not enough money." };
+    const A = placeAirport(sa.x, sa.y, "small", owner), B = placeAirport(sb.x, sb.y, "small", owner); if (!A.ok || !B.ok) continue;
+    if (rv) rivalPays(rv, cost(AIRPORTS.small.cost) * 2);
     const hangar = S.depots.find(d => d.airport === A.station.id);
+    if (rv) { const vh = rivalVehicle(rv, plane, hangar, [A.station.id, B.station.id]); return vh ? { ok: true, vh, a: A.station, b: B.station } : { ok: false, msg: "Not enough money." }; }
     const r = buyVehicle(plane.id, hangar); if (!r.ok) return { ok: false, msg: r.msg };
     if (!r.vh.orders.orders.length) { addStopTo(r.vh, A.station.id); addStopTo(r.vh, B.station.id); }
     return { ok: true, vh: r.vh, a: A.station, b: B.station };
@@ -6178,7 +6419,7 @@ function simulateDays(n) {
 
 // -------------------------------------------------------------- boot
 function boot() {
-  wireBars(); resize(); setupMinimap(); setupDesktop();
+  wireBars(); resize(); setupMinimap(); setupDesktop(); initOnline();
   if (S == null) { newGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 18, rivals: 0, startYear: 1950, seed: "7" }); buildToolbar(); resize(); centerOn(S.map.towns[0].x, S.map.towns[0].y); }
   showMenu(true);
   requestAnimationFrame(frame);
@@ -6373,7 +6614,7 @@ const TESTS = [
     assert(bulldoze(rd.x, rd.y).ok && R.roads.hasRoad(rd.x, rd.y) && !R.rail.hasRoad(rd.x, rd.y), "bulldoze takes the rails and leaves the road");
     const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(buildTrackTile(free.x, free.y).ok, "track"); assert(buildRoadTile(free.x, free.y).ok && crossingAt(free.x, free.y), "road over track makes a crossing too");
   }],
-  ["rail", "Passing loop with one-way signals: two trains pass; without signals a stuck train is reported", () => {
+  ["rail", "Passing loop with one-way path signals: two trains pass; without signals a stuck train is reported", () => {
     let area = null;
     for (const seed of ["71", "72", "73", "74", "75"]) {
       startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed });
@@ -6387,7 +6628,7 @@ const TESTS = [
     const west = placeStation(X, Y, "trainStation", "player").station; placeStation(X + 1, Y, "trainStation", "player");
     const east = placeStation(X + 11, Y, "trainStation", "player").station; placeStation(X + 10, Y, "trainStation", "player");
     eq(stationTiles(west).length, 2, "two-tile platform");
-    S.signals[key(X + 6, Y)] = { dx: 1, dy: 0, two: false }; S.signals[key(X + 5, Y + 2)] = { dx: -1, dy: 0, two: false };
+    S.signals[key(X + 6, Y)] = { dx: 1, dy: 0, two: false, path: true }; S.signals[key(X + 5, Y + 2)] = { dx: -1, dy: 0, two: false, path: true };   // path signals: the loop has no signal at the station end
     const loco = V.availableModels(1950, "locomotive").sort((a, b) => a.price - b.price)[0], wag = V.availableModels(1950, "wagon").find(w => w.cargo === "passengers");
     const tm = V.buildTrainModel(loco.id, wag.id, 2); eq(trainLen(tm), 2, "a three-unit train is two tiles long");
     const A = makeVehicle("player", tm.id, { x: X + 1, y: Y }, [west.id, east.id]); A.dir = { dx: 1, dy: 0 };
@@ -6415,7 +6656,9 @@ const TESTS = [
     S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const r1 = cycleSignal(a.x + 1, a.y); assert(r1.ok && !r1.signal.two && r1.signal.dx === 1, "one-way east");
     const r2 = cycleSignal(a.x + 1, a.y); assert(r2.signal.dx === -1, "turned round"); const r3 = cycleSignal(a.x + 1, a.y); assert(r3.signal.two, "two-way");
-    const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && !r4.signal && !S.signals[key(a.x + 1, a.y)], "removed");
+    const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && r4.signal.path, "path signal");
+    const r5 = cycleSignal(a.x + 1, a.y); assert(r5.signal.path && r5.signal.dx === -1, "path turned round");
+    const r6 = cycleSignal(a.x + 1, a.y); assert(r6.ok && !r6.signal && !S.signals[key(a.x + 1, a.y)], "removed");
     buildTrackTile(a.x + 2, a.y + 1); assert(!cycleSignal(a.x + 2, a.y).ok, "no signal on a junction");
   }],
   ["rail", "Longer stations: platforms join, catchment grows, trains load faster", () => {
@@ -6806,6 +7049,86 @@ const TESTS = [
     key("f"); assert(openWins.fleet, "F opens Fleet"); key("Escape"); assert(!openWins.fleet, "Esc closes it");
     key("?"); assert(openWins.help, "help window"); closeAllWins();
     key("2"); eq(ui.speed, 2); key("1"); eq(ui.speed, 1);
+  }],
+  ["rail", "Block signals wait for the whole block; path signals only for the route", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 900000; const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 4; y < S.map.h - 6 && !a; y++) for (let x = 3; x < S.map.w - 14 && !a; x++) { let ok = true; for (let dy = -1; dy <= 3 && ok; dy++) for (let dx = 0; dx <= 11 && ok; dx++) if (!free(x + dx, y + dy)) ok = false; if (ok) a = { x, y }; }
+    assert(a, "room"); for (let k = 0; k <= 10; k++) buildTrackTile(a.x + k, a.y);
+    for (let k = 1; k <= 3; k++) buildTrackTile(a.x + 6, a.y + k);                         // a siding off the block
+    const st = placeStation(a.x + 10, a.y, "trainStation", "player").station;
+    S.signals[key(a.x + 2, a.y)] = { dx: 1, dy: 0, two: false };
+    const tm = V.buildTrainModel(V.availableModels(1950, "locomotive")[0].id, V.availableModels(1950, "wagon")[0].id, 1);
+    const B = makeVehicle("player", tm.id, { x: a.x + 6, y: a.y + 3 }, []); R.res.set(key(a.x + 6, a.y + 3), B.id);   // parked on the siding
+    const A = makeVehicle("player", tm.id, { x: a.x + 2, y: a.y }, [st.id]); A.dir = { dx: 1, dy: 0 }; A.trail = [{ x: a.x + 2, y: a.y }];
+    const goal = goalTiles({ kind: "stop", id: st.id });
+    assert(!reserveAhead(A, goal), "block signal stays red while the siding in its block is taken");
+    S.signals[key(a.x + 2, a.y)].path = true;
+    assert(reserveAhead(A, goal), "path signal lets the train through: its route does not touch the siding");
+  }],
+  ["air", "Planes with an engine fault land at the nearest airport", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 16, rivals: 0, startYear: 1960, seed }); d = buildDemoAir(); if (d.ok) break; }
+    assert(d && d.ok, "airports"); const v = d.vh; assert(v.core.breakdownsEnabled, "aircraft can break down on medium");
+    for (let k = 0; k < 60 && v.state !== "moving"; k++) simulateDays(0.5);
+    assert(v.state === "moving", "in the air"); aircraftEmergency(v);
+    assert(v.emergency && OR.currentOrder(v.orders).kind === "depot", "heading for a hangar"); assert(S.news.items.some(n => /engine fault/.test(n.text)), "news");
+    for (let k = 0; k < 60 && v.emergency; k++) simulateDays(1);
+    assert(!v.emergency, "landed and repaired"); const t = v.trips || 0; simulateDays(60); assert((v.trips || 0) > t, "back on its route");
+  }],
+  ["rivals", "Rivals start tanker and air routes", () => {
+    let rv = null, ok = false;
+    for (const seed of ["11", "12", "13", "14", "15", "16", "17", "18"]) {
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, startYear: 1960, seed, water: 0.85 });
+      rv = S.rivals[0]; rv.ai.cash = 5e6; const keep = rng;
+      for (let k = 0; k < 80 && !((rv.sea || 0) && (rv.air || 0)); k++) rivalSeaAirMonth(rv);
+      if ((rv.sea || 0) && (rv.air || 0)) { ok = true; break; }
+    }
+    assert(ok, "a rival opened a sea route and an air route");
+    const fleet = S.vehicles.filter(v => v.owner === rv.ai.id);
+    assert(fleet.some(isShip) && fleet.some(isAir), "rival owns a ship and a plane");
+    const dock = S.stations.find(s => s.kind === "dock" && s.owner === rv.ai.id); assert(dock && !bulldoze(dock.x, dock.y).ok, "player cannot bulldoze a rival dock");
+    simulateDays(200); assert(fleet.find(isAir).trips > 0, "rival plane flies");
+  }],
+  ["online", "Cloud saves: save, list, load and delete (in-memory test store)", () => {
+    // a small stand-in for the db capability with the calls the game uses
+    const store = new Map();
+    const docRef = (path) => ({ path, async get() { const d = store.get(path); return { id: path.split("/").pop(), exists: !!d, data: () => d }; }, async set(v) { store.set(path, JSON.parse(JSON.stringify(v))); }, async delete() { store.delete(path); }, collection: (c) => colRef(path + "/" + c) });
+    const colRef = (path) => ({ doc: (id) => docRef(path + "/" + id), async get() { const n = path.split("/").length + 1; return { docs: [...store.keys()].filter(k => k.startsWith(path + "/") && k.split("/").length === n).map(k => ({ id: k.split("/").pop(), exists: true, data: () => store.get(k) })) }; } });
+    const db = { collection: colRef, doc: docRef };
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 1950, seed: "cloud" });
+    const p = (async () => {
+      const keep = CHUNK; CHUNK = 20000; const id = await cloudSave("Cloud test", db, "u1"); CHUNK = keep;
+      const list = await cloudList(db, "u1"); eq(list.length, 1, "listed"); eq(list[0].name, "Cloud test");
+      assert(list[0].chunks >= 2, "a big map is stored in pieces: " + list[0].chunks);
+      const date = JSON.stringify(S.date); simulateDays(30);
+      assert(importSaveText(await cloudLoadText(id, db, "u1")), "loaded"); eq(JSON.stringify(S.date), date, "same date as saved");
+      await cloudDelete(id, db, "u1"); eq((await cloudList(db, "u1")).length, 0, "deleted"); eq(store.size, 0, "pieces deleted too");
+    })();
+    window.__asyncTests = (window.__asyncTests || []).concat([p]);
+  }],
+  ["online", "Online race: host starts, players get the same map, league table sorts by value", () => {
+    // stand-in room: two pages share one presence list
+    const peers = new Map(); let listeners = [];
+    const mk = (peer, me) => ({ name: "", async presence(patch) { const old = peers.get(peer) || { peer, sameTab: me, kind: "viewer", presence: {} }; peers.set(peer, { ...old, presence: { ...old.presence, ...patch } }); listeners.forEach(f => f({ peers: [...peers.values()] })); }, peers: () => [...peers.values()], onPeers(f) { listeners.push(f); return () => {}; }, leave() {} });
+    const room = { join: async () => mk("me", true) };
+    const p = (async () => {
+      menuState.seed = "race-seed"; menuState.size = 64; menuState.towns = 8; menuState.rivals = 0;
+      const r = await joinRace("abc12", "Hosting Co", true, raceCfg(), room); assert(r.ok, r.reason);
+      await startRace(); assert(S.race && S.race.code === "abc12", "host started"); eq(S.map.seed, "race-seed", "race map");
+      eq(S.retireYear, S.startYear + 20, "race lasts 20 years");
+      peers.set("other", { peer: "other", sameTab: false, kind: "viewer", presence: { name: "Rival Co", role: "player", state: "started", value: 9e9, year: 1952, month: 3 } });
+      ONLINE.peers = [...peers.values()]; ONLINE.last = 0; racePulse(1e12);
+      await new Promise(res => setTimeout(res, 0));
+      const t = raceTable(); eq(t[0].name, "Rival Co", "richest first"); assert(t.some(x => x.me), "me in the table");
+      raceWindow(); assert(document.querySelector(".win[data-id=race]").textContent.includes("Rival Co"), "race window"); closeAllWins();
+      // a player waiting in the lobby starts when the host does
+      ONLINE.host = false; ONLINE.started = false; startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "other" });
+      ONLINE.peers = [{ peer: "h", sameTab: false, kind: "viewer", presence: { role: "host", state: "started", cfg: { climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "host-seed" } } }];
+      raceWatch(); eq(S.map.seed, "host-seed", "player follows the host's map"); closeAllWins();
+      ONLINE.race = null; ONLINE.peers = []; ONLINE.started = false;
+    })();
+    window.__asyncTests = (window.__asyncTests || []).concat([p]);
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

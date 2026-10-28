@@ -59,16 +59,32 @@ function cycleSignal(x, y) {
   const ax = trackAxis(x, y); if (!ax) return { ok: false, reason: "Put signals on straight track, not on a junction." };
   const [d1, d2] = ax === "x" ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
   const cur = S.signals[k];
-  let next;
-  if (!cur) next = { dx: d1[0], dy: d1[1], two: false };
-  else if (!cur.two && cur.dx === d1[0] && cur.dy === d1[1]) next = { dx: d2[0], dy: d2[1], two: false };
-  else if (!cur.two) next = { dx: d1[0], dy: d1[1], two: true };
-  else next = null;
+  // Block one way, turned round, two-way block, path one way, path turned round, then off.
+  const cycle = [
+    { dx: d1[0], dy: d1[1], two: false }, { dx: d2[0], dy: d2[1], two: false }, { dx: d1[0], dy: d1[1], two: true },
+    { dx: d1[0], dy: d1[1], two: false, path: true }, { dx: d2[0], dy: d2[1], two: false, path: true },
+  ];
+  const at = cur ? cycle.findIndex(c => c.dx === cur.dx && c.dy === cur.dy && !!c.two === !!cur.two && !!c.path === !!cur.path) : -1;
+  const next = at + 1 < cycle.length ? cycle[at + 1] : null;
   if (next && !cur) { const c = cost(SIGNAL_COST); if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   if (next) S.signals[k] = next; else delete S.signals[k];
   return { ok: true, signal: next, cost: next && !cur ? cost(SIGNAL_COST) : 0 };
 }
-function signalText(sg) { if (!sg) return "Signal removed."; return sg.two ? "Two-way signal: trains stop here in both directions." : "One-way signal: trains pass only one way and stop here for the block ahead."; }
+function signalText(sg) {
+  if (!sg) return "Signal removed.";
+  if (sg.path) return "Path signal: a train goes on as soon as its own route is clear, even if another train is elsewhere in the block.";
+  return sg.two ? "Two-way block signal: trains stop here both ways until the whole block ahead is empty." : "One-way block signal: trains pass one way only, and wait until the whole block ahead is empty.";
+}
+// Every track tile in the block that starts at `first`, entered from `from`. A block ends at the next signal.
+function blockTiles(first, from) {
+  const W = S.map.w, start = tk(first), stop = tk(from), seen = new Set([start]), q = [start];
+  while (q.length && seen.size < 600) {
+    const k = q.pop(); if (k !== start && signalAt(k)) continue;   // signal tiles close the block
+    const x = k % W, y = (k / W) | 0;
+    for (const [dx, dy] of DIR4) { const nx = x + dx, ny = y + dy, nk = ny * W + nx; if (nk === stop || seen.has(nk) || !inB(nx, ny) || !R.rail.hasRoad(nx, ny)) continue; seen.add(nk); q.push(nk); }
+  }
+  return [...seen];
+}
 
 // ---- pathfinding over track. Returns the tiles after `start` up to the first goal tile.
 function railPath(start, goals, opt) {
@@ -135,6 +151,11 @@ function reserveAhead(vh, goals) {
     prev = t;
   }
   if (!block.every(t => railFree(t, vh.id))) return false;     // red signal: wait
+  // Waiting at a block signal: the whole block ahead must be empty, not just this route.
+  const here = signalAt(tk(vh.tile)), d0 = { dx: path[0].x - vh.tile.x, dy: path[0].y - vh.tile.y };
+  if (here && !here.path && (here.two || (here.dx === d0.dx && here.dy === d0.dy))) {
+    for (const k of blockTiles(path[0], vh.tile)) { const o = R.res.get(k); if (o && o !== vh.id && !railDepotAt(k)) return false; }
+  }
   for (const t of block) claim(t, vh.id);
   vh.res = block;
   return true;

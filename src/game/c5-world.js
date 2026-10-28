@@ -107,6 +107,18 @@ function rivalRailMonth(rv) {
   for (const s of S.stations) if (s.owner === "player" && ST.covers(s, ends.from.x, ends.from.y) && s.served[cargo]) { EV.addNews(S.news, S.date, "bad", ai.name + " now competes with you for " + cargo + " at " + ends.from.name + ".", { x: ends.from.x, y: ends.from.y }); break; }
 }
 
+// Rivals also open oil tanker routes from rigs and air routes between big towns.
+function rivalSeaAirMonth(rv) {
+  const ai = rv.ai; if (ai.bankrupt || ai.cash < 200000 || rng() > 0.15) return;
+  rv.sea = rv.sea || 0; rv.air = rv.air || 0;
+  if (rv.sea < 2 && S.map.industries.some(i => i.kind === "oilRig")) {
+    const r = buildDemoShip(ai.id, rv); if (r.ok) { rv.sea++; EV.addNews(S.news, S.date, "info", ai.name + " started an oil tanker service from " + r.rig.name + ".", { x: r.dock.x, y: r.dock.y }); return; }
+  }
+  if (rv.air < 2 && S.date.year >= 1955) {
+    const r = buildDemoAir(ai.id, rv); if (r.ok) { rv.air++; EV.addNews(S.news, S.date, "info", ai.name + " opened an air route from " + r.a.name + " to " + r.b.name + ".", { x: r.a.x, y: r.a.y }); }
+  }
+}
+
 // ---------------------------------------------------------- prices and inflation
 function vehiclePrice(m) { return Math.round(m.price * (S ? S.inflation : 1)); }
 function saleValue(vh) { return Math.round(core.vehicleSalePrice(vh.core, modelOf(vh)) * S.inflation); }

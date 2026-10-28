@@ -169,8 +169,9 @@ function savesWin() {
       h += list.length ? "<div class='saves'>" + list.map(sv => "<div class='sv'><div class='svn'><b>" + esc(sv.slot === AUTO ? "Autosave" : sv.label.split(" · ")[0]) + "</b><span class='dim'>" + esc(sv.label.split(" · ")[1] || "") + " · saved " + when(sv.savedAt) + "</span></div><div class='row'>" +
         "<button data-a='load' data-s='" + esc(sv.slot) + "'>Load</button>" + (live && sv.slot !== AUTO ? "<button data-a='over' data-s='" + esc(sv.slot) + "'>Overwrite</button>" : "") +
         "<button data-a='del' data-s='" + esc(sv.slot) + "' class='" + (armed === sv.slot ? "armed" : "") + "'>" + (armed === sv.slot ? "Tap again to delete" : "Delete") + "</button></div></div>").join("") + "</div>" : "<p class='dim'>No saved games yet.</p>";
-      h += "<h4>Files</h4><div class='row'>" + (live ? "<button class='gb sm' data-a='export'>Export to file</button>" : "") + "<button class='gb sm' data-a='import'>Import a save file</button></div>";
+      h += "<h4>Files</h4><div class='row'>" + (live ? "<button class='gb sm' data-a='export'>Export to file</button>" : "") + "<button class='gb sm' data-a='import'>Import a save file</button></div><div class='cloudbox'></div>";
       body.innerHTML = h;
+      cloudSection(body.querySelector(".cloudbox"));
     }
     body.onclick = e => {
       const b = e.target.closest("button"); if (!b || !b.dataset.a) return; const a = b.dataset.a, slot = b.dataset.s;

@@ -7,9 +7,26 @@ const ELECTRIC_LOCO = /^(Volt|Arc|Meridian|Tempest)/;
 // Draw a side-view sprite so it lines up with the isometric road or track it is on.
 // Moving along +x the vehicle heads down-right, along +y down-left; the shear keeps
 // its wheels on the ground line, which gives four distinct directions.
-function isoSprite(img, x, y, w, h, dx, dy) {
+// With a `look` the vehicle also gets a roof and the end face the camera can see (its
+// front when it drives towards you, its back when it drives away), so it reads as a solid body.
+function isoSprite(img, x, y, w, h, dx, dy, look) {
   const vx = (dx - dy), vy = (dx + dy) * 0.5;               // screen direction, before scaling
   const sx = vx < 0 ? -1 : 1, shear = vx === 0 ? 0 : vy / Math.abs(vx);
+  if (look) {
+    // local sprite x maps to screen (sx*x, shear*x); the body is about this deep, away from the camera
+    const depth = h * 0.3, along = dx !== 0 ? [0, -1] : [-1, 0];   // the hidden side faces -y or -x
+    const ddx = (along[0] - along[1]) * (TW / 2) / 20 * depth * 0.5, ddy = (along[0] + along[1]) * (TH / 2) / 20 * depth * 0.5;
+    const top = -h * 0.38, bot = -h * 0.06, half = w * 0.44;
+    const P = (lx, ly) => [x + sx * lx, y + shear * lx + ly];
+    const towardsCamera = vy > 0, endX = (dx + dy) > 0 ? half : -half;   // the end with larger screen y is the one we see
+    const roof = [P(-half, top), P(half, top)];
+    ctx.fillStyle = shade(look.roof || look.body, 1.15);
+    ctx.beginPath(); ctx.moveTo(roof[0][0], roof[0][1]); ctx.lineTo(roof[1][0], roof[1][1]); ctx.lineTo(roof[1][0] + ddx, roof[1][1] + ddy); ctx.lineTo(roof[0][0] + ddx, roof[0][1] + ddy); ctx.closePath(); ctx.fill();
+    const e1 = P(endX, top), e2 = P(endX, bot);
+    ctx.fillStyle = shade(look.body, towardsCamera ? 0.92 : 0.7);
+    ctx.beginPath(); ctx.moveTo(e1[0], e1[1]); ctx.lineTo(e2[0], e2[1]); ctx.lineTo(e2[0] + ddx, e2[1] + ddy); ctx.lineTo(e1[0] + ddx, e1[1] + ddy); ctx.closePath(); ctx.fill();
+    if (towardsCamera) { const g1 = P(endX, top + (bot - top) * 0.15), g2 = P(endX, top + (bot - top) * 0.5); ctx.fillStyle = "rgba(191,227,255,.9)"; ctx.beginPath(); ctx.moveTo(g1[0] + ddx * 0.15, g1[1] + ddy * 0.15); ctx.lineTo(g2[0] + ddx * 0.15, g2[1] + ddy * 0.15); ctx.lineTo(g2[0] + ddx * 0.85, g2[1] + ddy * 0.85); ctx.lineTo(g1[0] + ddx * 0.85, g1[1] + ddy * 0.85); ctx.closePath(); ctx.fill(); }
+  }
   ctx.save(); ctx.transform(sx, shear, 0, 1, x, y);
   ctx.drawImage(img, -w / 2, -h * 0.82, w, h);
   ctx.restore();

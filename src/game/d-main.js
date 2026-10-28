@@ -17,6 +17,7 @@ function afterStart() {
   const t = S.map.towns[0]; if (t) { view.z = 1.1; centerOn(t.x, t.y); }
   $("#gameover").hidden = true;
   ui.follow = null; MM.img = null; renderTutorial();
+  $("#brace").hidden = !(S && S.race);
 }
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
@@ -28,9 +29,10 @@ function showMenu(first) {
   const anySave = savesList().length > 0;
   if (!menuState.seed) menuState.seed = String(mapgen.randomSeed());
   const opt = (g, v, label) => "<button class='chip " + (menuState[g] === v ? "on" : "") + "' data-g='" + g + "' data-v='" + v + "'>" + label + "</button>";
-  const tabs = "<div class='tabs'>" + [["new", "New game"], ["sc", "Scenarios"], ["hs", "High scores"]].map(([v, l]) => "<button data-act='v-" + v + "' class='" + (menuState.view === v ? "on" : "") + "'>" + l + "</button>").join("") + "</div>";
+  const tabs = "<div class='tabs'>" + [["new", "New game"], ["sc", "Scenarios"], ["on", "Online"], ["hs", "High scores"]].map(([v, l]) => "<button data-act='v-" + v + "' class='" + (menuState.view === v ? "on" : "") + "'>" + l + "</button>").join("") + "</div>";
   let view;
   if (menuState.view === "sc") view = "<div class='scs'>" + SCENARIOS.map(sc => "<button class='sc' data-act='sc' data-id='" + sc.id + "'><b>" + sc.name + "</b><span>" + sc.blurb + "</span><span class='dim'>" + CLIM[sc.cfg.climate].label + " · " + sc.cfg.difficulty + " · from " + sc.cfg.startYear + "</span></button>").join("") + "</div>";
+  else if (menuState.view === "on") view = onlineView();
   else if (menuState.view === "hs") view = highScores().length ? "<table class='tb'>" + highScores().map((e, i) => "<tr><td>" + (i + 1) + ". " + esc(e.name) + (e.scenario ? " <span class='dim'>" + esc(e.scenario) + (e.won ? ", won" : "") + "</span>" : "") + "</td><td>" + e.score + " " + e.title + "</td><td>" + e.year + "</td></tr>").join("") + "</table>" : "<p class='dim'>No scores yet. Retire a company to set one.</p>";
   else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
@@ -60,7 +62,8 @@ function showMenu(first) {
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
-    if (a === "v-new" || a === "v-sc" || a === "v-hs") { menuState.view = a.slice(2); const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
+    if (a && a.startsWith("on-")) { onlineAction(a); return; }
+    if (a === "v-new" || a === "v-sc" || a === "v-hs" || a === "v-on") { menuState.view = a.slice(2); const sd = $("#seed"); if (sd) menuState.seed = sd.value; showMenu(); return; }
     if (a === "sc") { startScenario(b.dataset.id); closeAllWins(); hideMenu(); afterStart(); }
     if (a === "import") pickSaveFile();
     if (a === "tests") { if (!S) startGame({ climate: "temperate", difficulty: "medium", mapSize: 64, towns: 10, rivals: 1, startYear: 1950, seed: "1234" }); testsWin(); }
@@ -97,6 +100,7 @@ function wireBars() {
   $("#bco").onclick = companyWin;
   $("#bnews").onclick = newsWin;
   $("#bhelp").onclick = helpWin;
+  $("#brace").onclick = raceWindow;
   $("#ticker").onclick = () => { if (ui.jump) centerOn(ui.jump.x, ui.jump.y); else newsWin(); };
   $("#zin").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z * 1.25, 0.45, 3));
   $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
@@ -125,6 +129,7 @@ function frame(now) {
     followTick();
     draw();
     drawMinimap(now);
+    racePulse(now);
     uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); tutorialTick(); if (S.gameOver) $("#gameover").hidden = false; }
   }
   requestAnimationFrame(frame);
@@ -216,7 +221,16 @@ function demoLine(mode, cargo, count, minDist) {
   centerOn(l.s1.x, l.s1.y); return { ok: true, line: l, vh: b.vh };
 }
 // Ships: oil from a rig to a refinery by tanker.
-function buildDemoShip() {
+// For the player (owner "player") the demo pays for itself; a rival company pays from its own cash.
+function rivalPays(rv, c) { if (!rv) return true; if (rv.ai.cash - c < 30000) return false; rv.ai.cash -= c; return true; }
+function rivalVehicle(rv, model, depot, stops) {
+  if (!rivalPays(rv, vehiclePrice(model))) return null;
+  const vh = makeVehicle(rv.ai.id, model.id, depot, stops); vh.core.breakdownsEnabled = false;
+  if (isAirModel(model)) { vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
+  return vh;
+}
+function buildDemoShip(owner, rv) {
+  owner = owner || "player";
   const m = S.map;
   for (const rig of m.industries.filter(i => i.kind === "oilRig")) {
     const rd = S.stations.find(s => s.rigId === rig.id); if (!rd) continue;
@@ -228,13 +242,16 @@ function buildDemoShip() {
         const w = waterNeighbour(x, y); if (w && R.sea.connected(w, rd.water)) dockAt = { x, y };
       }
       if (!dockAt) continue;
-      S.company.cash += 150000;
-      const d = placeDock(dockAt.x, dockAt.y); if (!d.ok) continue;
+      if (!rv) S.company.cash += 150000; else if (rv.ai.cash < cost(2400) + cost(3500) + 60000) return { ok: false, msg: "Not enough money." };
+      const d = placeDock(dockAt.x, dockAt.y, owner); if (!d.ok) continue;
+      if (rv) rivalPays(rv, cost(2400));
       let yard = null;
       for (let r = 1; r <= 6 && !yard; r++) for (let dy = -r; dy <= r && !yard; dy++) for (let dx = -r; dx <= r && !yard; dx++) { const x = d.station.water.x + dx, y = d.station.water.y + dy; if (inB(x, y) && m.water[key(x, y)] && !m.occupied[key(x, y)] && landNeighbour(x, y) && !sameT({ x, y }, d.station.water) && R.sea.connected({ x, y }, rd.water)) yard = { x, y }; }
       if (!yard) continue;
-      const sy = placeShipyard(yard.x, yard.y); if (!sy.ok) continue;
+      const sy = placeShipyard(yard.x, yard.y, owner); if (!sy.ok) continue;
+      if (rv) rivalPays(rv, cost(3500));
       const tanker = V.availableModels(S.date.year, "ship").filter(x => x.cargo === "oil").sort((a, b) => a.price - b.price)[0];
+      if (rv) { const vh = rivalVehicle(rv, tanker, sy.depot, [rd.id, d.station.id]); if (!vh) return { ok: false, msg: "Not enough money." }; vh.orders.orders[0].load = "full"; return { ok: true, vh, rig, ref, dock: d.station, rigDock: rd }; }
       const r = buyVehicle(tanker.id, sy.depot); if (!r.ok) return { ok: false, msg: r.msg };
       if (!r.vh.orders.orders.length) { addStopTo(r.vh, rd.id); addStopTo(r.vh, d.station.id); }
       r.vh.orders.orders[0].load = "full";
@@ -244,17 +261,20 @@ function buildDemoShip() {
   return { ok: false, msg: "No oil rig with a reachable refinery on this map." };
 }
 // Aircraft: a small airport by each of two towns and a propeller plane between them.
-function buildDemoAir() {
+function buildDemoAir(owner, rv) {
+  owner = owner || "player";
   const m = S.map, ts = m.towns.slice().sort((a, b) => b.population - a.population).slice(0, 8);
   const spot = (t) => { for (let r = 2; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = t.x + dx, y = t.y + dy; let ok = true, h = null; for (let a = 0; a < 2 && ok; a++) for (let b = 0; b < 2 && ok; b++) { const i = key(x + b, y + a); if (!inB(x + b, y + a) || m.water[i] || m.occupied[i] || R.roads.hasRoad(x + b, y + a) || R.rail.hasRoad(x + b, y + a)) ok = false; else if (h === null) h = m.height[i]; else if (m.height[i] !== h) ok = false; } if (ok) return { x, y }; } return null; };
   for (const a of ts) for (const b of ts) {
     if (a === b || Math.hypot(a.x - b.x, a.y - b.y) < 20) continue;
     const sa = spot(a), sb = spot(b); if (!sa || !sb) continue;
-    S.company.cash += 150000;
-    const A = placeAirport(sa.x, sa.y, "small"), B = placeAirport(sb.x, sb.y, "small"); if (!A.ok || !B.ok) continue;
     const plane = V.availableModels(Math.max(S.date.year, 1955), "aircraft").filter(x => x.cargo === "passengers" && !isJet(x)).sort((p, q) => p.price - q.price)[0];
     if (!plane || plane.introYear > S.date.year) return { ok: false, msg: "No aircraft yet in " + S.date.year + "." };
+    if (!rv) S.company.cash += 150000; else if (rv.ai.cash < cost(AIRPORTS.small.cost) * 2 + vehiclePrice(plane) + 30000) return { ok: false, msg: "Not enough money." };
+    const A = placeAirport(sa.x, sa.y, "small", owner), B = placeAirport(sb.x, sb.y, "small", owner); if (!A.ok || !B.ok) continue;
+    if (rv) rivalPays(rv, cost(AIRPORTS.small.cost) * 2);
     const hangar = S.depots.find(d => d.airport === A.station.id);
+    if (rv) { const vh = rivalVehicle(rv, plane, hangar, [A.station.id, B.station.id]); return vh ? { ok: true, vh, a: A.station, b: B.station } : { ok: false, msg: "Not enough money." }; }
     const r = buyVehicle(plane.id, hangar); if (!r.ok) return { ok: false, msg: r.msg };
     if (!r.vh.orders.orders.length) { addStopTo(r.vh, A.station.id); addStopTo(r.vh, B.station.id); }
     return { ok: true, vh: r.vh, a: A.station, b: B.station };
@@ -269,7 +289,7 @@ function simulateDays(n) {
 
 // -------------------------------------------------------------- boot
 function boot() {
-  wireBars(); resize(); setupMinimap(); setupDesktop();
+  wireBars(); resize(); setupMinimap(); setupDesktop(); initOnline();
   if (S == null) { newGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 18, rivals: 0, startYear: 1950, seed: "7" }); buildToolbar(); resize(); centerOn(S.map.towns[0].x, S.map.towns[0].y); }
   showMenu(true);
   requestAnimationFrame(frame);

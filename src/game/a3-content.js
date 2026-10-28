@@ -68,13 +68,14 @@ function placeDock(x, y, owner) {
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);
   return { ok: true, station: s, cost: c, tile: { x, y } };
 }
-function placeShipyard(x, y) {
+function placeShipyard(x, y, owner) {
+  owner = owner || "player";
   const i = key(x, y), m = S.map;
   if (!inB(x, y) || !m.water[i] || m.occupied[i]) return { ok: false, reason: "Build a shipyard on open water next to the shore." };
   if (!landNeighbour(x, y)) return { ok: false, reason: "A shipyard must touch the shore." };
-  const c = cost(3500); if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
-  spend("construction", c);
-  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + " Shipyard", x, y, kind: "ship", owner: "player" };
+  const c = cost(3500);
+  if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + " Shipyard", x, y, kind: "ship", owner };
   S.depots.push(d); R.depotAt.set(i, d); m.occupied[i] = 1;
   return { ok: true, depot: d, cost: c };
 }
@@ -112,7 +113,7 @@ function airStep(vh) {
   const st = dest.kind === "stop" ? stationById(dest.id) : stationById((depotById(dest.id) || {}).airport);
   if (!st) { vh.state = "idle"; return; }
   if (vh.at === st.id) {
-    if (dest.kind === "depot") { if (OR.arrive(vh.orders, { kind: "depot", id: dest.id })) { dock(vh, dest); return; } }
+    if (dest.kind === "depot") { if (OR.arrive(vh.orders, { kind: "depot", id: dest.id })) { vh.emergency = false; dock(vh, dest); return; } }
     else if (OR.arrive(vh.orders, { kind: "stop", id: st.id })) { core.serviceVehicle(vh.core, modelOf(vh)); dock(vh, dest); return; }
   }
   const c = airportCentre(st), here = vh.pos || { x: vh.tile.x, y: vh.tile.y };
@@ -120,9 +121,21 @@ function airStep(vh) {
   vh.flightLen = Math.max(1, Math.hypot(c.x - here.x, c.y - here.y));
   vh.dir = { dx: Math.sign(Math.round(c.x - here.x)), dy: Math.sign(Math.round(c.y - here.y)) };
 }
+// A plane that breaks down does not stop in the air: it slows and lands at the nearest airport.
+function aircraftEmergency(vh) {
+  const here = vh.state === "moving" ? { x: vh.from.x + (vh.to.x - vh.from.x) * vh.p, y: vh.from.y + (vh.to.y - vh.from.y) * vh.p } : (vh.pos || vh.tile);
+  let best = null, bd = 1e9;
+  for (const s of S.stations) if (s.kind === "airport" && s.owner === vh.owner && canUseStation(modelOf(vh), s)) { const c = airportCentre(s), d = Math.hypot(c.x - here.x, c.y - here.y); if (d < bd) { bd = d; best = s; } }
+  if (!best) return;
+  const hangar = S.depots.find(d => d.airport === best.id); if (!hangar) return;
+  vh.orders.orders.splice(vh.orders.current, 0, { kind: "depot", depotId: hangar.id, temp: true }); vh.orders.phase = "travelling";
+  vh.emergency = true; vh.broken = false;
+  if (vh.state === "moving") { vh.pos = here; vh.tile = { x: Math.round(here.x), y: Math.round(here.y) }; vh.state = "idle"; vh.at = null; airStep(vh); }
+  if (vh.owner === "player") { EV.addNews(S.news, S.date, "bad", modelOf(vh).name + " #" + vh.id.slice(1) + " has an engine fault and is landing at " + best.name + ".", { x: best.x, y: best.y }); sound.play("breakdown"); }
+}
 function airMove(vh, dtDays) {
   const m = modelOf(vh); if (!m) return;
-  vh.p += dtDays * (m.speedKmh / 40) / vh.flightLen;
+  vh.p += dtDays * (m.speedKmh / 40) * (vh.emergency ? 0.5 : 1) / vh.flightLen;
   if (vh.p >= 1) { vh.pos = { x: vh.to.x, y: vh.to.y }; vh.tile = { x: Math.round(vh.to.x), y: Math.round(vh.to.y) }; vh.from = vh.to; vh.p = 0; vh.state = "idle"; vh.at = vh.goal; tryStep(vh); }
 }
 
