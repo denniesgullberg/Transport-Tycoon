@@ -90,7 +90,7 @@ li input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   <h3>Phase 1: fix and secure</h3>
   <p class="why">Small items that remove rough edges, and keeping the code safe now that it's all built here.</p>
   <ol>
-    <li data-id="repo"><input type="checkbox" id="c-repo" aria-label="Done: Source in GitHub"><span class="n">1</span><div><div class="t">Keep the game source in GitHub</div><div class="d">The game is now built only here. Store the source in a GitHub repo after each update, so nothing is lost if this workspace resets.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Code</span></div></div></li>
+    <li data-id="repo" data-shipped><input type="checkbox" id="c-repo" aria-label="Done: Source in GitHub"><span class="n">1</span><div><div class="t">Keep the game source in GitHub</div><div class="d">The game is now built only here. Store the source in a GitHub repo after each update, so nothing is lost if this workspace resets.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Code</span></div></div></li>
     <li data-id="bulldoze"><input type="checkbox" id="c-bulldoze" aria-label="Done: Bulldoze stop only"><span class="n">2</span><div><div class="t">Bulldozing a stop removes only the stop</div><div class="d">Today it removes the stop and the road or track under it in one tap.</div><div class="tags"><span class="tag bug">Bug</span><span class="tag s">Small</span></div></div></li>
     <li data-id="export"><input type="checkbox" id="c-export" aria-label="Done: Export and import saves"><span class="n">3</span><div><div class="t">Working save export and import</div><div class="d">Make Export save a real download, and add Import from file.</div><div class="tags"><span class="tag bug">Bug</span><span class="tag s">Small</span></div></div></li>
     <li data-id="slots"><input type="checkbox" id="c-slots" aria-label="Done: Named save slots"><span class="n">4</span><div><div class="t">Named save slots</div><div class="d">Several saves with names and dates, load and delete from a list.</div><div class="tags"><span class="tag s">Small</span><span class="tag">Menus</span></div></div></li>
@@ -168,7 +168,7 @@ li input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   var KEY = "tc-roadmap-done", done = {};
   try { done = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { done = {}; }
   var items = document.querySelectorAll("li[data-id]"), left = document.getElementById("left");
-  function update(){ var n = 0; items.forEach(function(li){ var on = !!done[li.dataset.id]; li.classList.toggle("done", on); li.querySelector("input").checked = on; if (!on) n++; }); left.textContent = n; }
+  function update(){ var n = 0; items.forEach(function(li){ var id = li.dataset.id, on = id in done ? !!done[id] : li.hasAttribute("data-shipped"); li.classList.toggle("done", on); li.querySelector("input").checked = on; if (!on) n++; }); left.textContent = n; }
   items.forEach(function(li){ li.querySelector("input").addEventListener("change", function(e){ done[li.dataset.id] = e.target.checked; try { localStorage.setItem(KEY, JSON.stringify(done)); } catch (err) {} update(); }); });
   update();
 })();
