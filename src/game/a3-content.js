@@ -56,13 +56,30 @@ function makeRigDocks() {
 }
 
 // ---------------------------------------------------------------- docks and shipyards
+// Size of the open water a tile belongs to (counted up to a limit), so a dock faces the lake, not a pond.
+function waterReach(t, limit) {
+  const seen = new Set([key(t.x, t.y)]), q = [t];
+  for (let n = 0; n < q.length && seen.size < limit; n++) for (const [dx, dy] of DIR4) { const nx = q[n].x + dx, ny = q[n].y + dy, k = key(nx, ny); if (inB(nx, ny) && !seen.has(k) && R.sea.hasRoad(nx, ny)) { seen.add(k); q.push({ x: nx, y: ny }); } }
+  return seen.size;
+}
+function freeShore(x, y) { const k = key(x, y); return inB(x, y) && !S.map.water[k] && !S.map.occupied[k] && !R.roads.hasRoad(x, y) && !R.rail.hasRoad(x, y); }
 function placeDock(x, y, owner) {
-  owner = owner || "player"; const i = key(x, y), m = S.map;
-  if (!inB(x, y) || m.water[i]) return { ok: false, reason: "Build a dock on the shore, next to water." };
+  owner = owner || "player"; let i = key(x, y); const m = S.map;
+  let w = null;
+  if (inB(x, y) && m.water[i]) {
+    // tapped the water: put the dock on the free shore tile next to it
+    if (m.occupied[i]) return { ok: false, reason: "Something is built here." };
+    const land = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).find(t => freeShore(t.x, t.y));
+    if (!land) return { ok: false, reason: "Build a dock on the shore, next to water." };
+    w = { x, y }; x = land.x; y = land.y; i = key(x, y);
+  }
+  if (!inB(x, y)) return { ok: false, reason: "Build a dock on the shore, next to water." };
   if (m.occupied[i] || R.roads.hasRoad(x, y) || R.rail.hasRoad(x, y)) return { ok: false, reason: "Something is built here." };
-  const w = waterNeighbour(x, y); if (!w) return { ok: false, reason: "A dock needs open water next to it." };
+  if (!w) { const opts = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter(t => inB(t.x, t.y) && m.water[key(t.x, t.y)] && !m.occupied[key(t.x, t.y)]); w = opts.sort((a, b) => waterReach(b, 3000) - waterReach(a, 3000))[0] || null; }
+  if (!w) return { ok: false, reason: "A dock needs open water next to it." };
   const no = owner === "player" ? councilRefuses(x, y) : ""; if (no) return { ok: false, reason: no };
   const c = cost(2400); if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  if (m.forest[i]) m.forest[i] = 0;
   const s = ST.newStation("s" + (++S.ids.s), townOf(x, y).name + " Dock", "dock", x, y);
   s.owner = owner; s.water = w; s.tiles = [{ x, y }];
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);

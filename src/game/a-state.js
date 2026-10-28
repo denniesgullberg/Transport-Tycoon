@@ -49,6 +49,7 @@ function newGame(cfg) {
   const settings = { ...DIFF[cfg.difficulty] };
   if (cfg.rivals != null) settings.rivals = cfg.rivals;
   const opts = { size: cfg.mapSize, towns: cfg.towns, ...CLIM[cfg.climate].map, climate: cfg.climate, names: cfg.names || (cfg.climate === "toyland" ? "silly" : "english") };
+  opts.industryScale = 1.6 * Math.max(1, Math.pow(cfg.mapSize / 96, 2));   // more industries, and more again on bigger maps
   if (cfg.water != null) opts.lakes = cfg.water;
   if (cfg.rivers != null) opts.rivers = cfg.rivers;
   const map = mapgen.generateMap(String(cfg.seed), opts);
@@ -63,7 +64,10 @@ function newGame(cfg) {
     qIncome: 0, quarterlyIncome: [], monthNet: [], bank: "ok", gameOver: false,
     rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, oneway: {}, townRating: {}, ads: {}, railOwner: {}, replace: { renew: false, rules: {} }, retireYear: cfg.retireYears ? cfg.startYear + cfg.retireYears : null, name: "Oakwood Transport",
   };
-  for (let i = 0; i < settings.rivals; i++) S.rivals.push({ ai: AI.createAi(i, settings.startingCash, 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] });
+  // rivals open for business a couple of years in, one after the other, so the player gets a head start
+  const delay = cfg.rivalDelay != null ? cfg.rivalDelay : 24;
+  S.rivalQueue = [];
+  for (let i = 0; i < settings.rivals; i++) { if (delay > 0) S.rivalQueue.push({ i, at: cfg.startYear * 12 + delay + i * 6 }); else addRival(i); }
   initRuntime();
   makeRigDocks(); rebuildSea();
   EV.addNews(S.news, S.date, "info", "Welcome to " + CLIM[cfg.climate].label + " valley. Build roads, stops and a depot, then buy a vehicle.");
@@ -424,6 +428,10 @@ function monthlyTick() {
   const reward = EV.checkObjectives(S.objectives, metricsNow(), S.date, S.news);
   if (reward) { S.company.cash += reward; post("other", reward); sound.play("cash"); }
   scenarioCheck();
+  // rivals whose start date has come
+  const nowM = S.date.year * 12 + S.date.month;
+  for (const q of (S.rivalQueue || []).filter(q => nowM >= q.at)) { const rv = addRival(q.i); EV.addNews(S.news, S.date, "info", rv.ai.name + " has started up and will compete with you."); }
+  if (S.rivalQueue) S.rivalQueue = S.rivalQueue.filter(q => nowM < q.at);
   // rivals plan
   const ends = mapgen.toEndpoints(m);
   for (const rv of S.rivals) {
@@ -438,6 +446,10 @@ function monthlyTick() {
   S.monthNet.push(Math.round(S.company.cash - before)); if (S.monthNet.length > 24) S.monthNet.shift();
   S.history.push({ year: S.date.year, month: S.date.month, income: S.lastIncome || 0, expenses: S.lastExpenses || 0, cash: Math.round(S.company.cash), loan: S.company.loan, cargoDelivered: S.metrics.cargo + S.metrics.passengers, vehicles: playerVehicles().length, companyValue: companyValue() });
   if (S.history.length > 240) S.history.shift();
+}
+function addRival(i) {
+  const rv = { ai: AI.createAi(i, Math.round(S.settings.startingCash * S.inflation), 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] };
+  S.rivals.push(rv); return rv;
 }
 function monthIncomeTrack(inc, exp) { S.lastIncome = inc; S.lastExpenses = exp; }
 
@@ -524,11 +536,21 @@ function placeStation(x, y, kind, owner) {
 }
 function placeDepot(x, y, dk, owner) {
   dk = dk || "road"; owner = owner || "player";
-  if (!netFor(dk).hasRoad(x, y)) return { ok: false, reason: dk === "rail" ? "Build a train depot on a track tile." : "Build a depot on a road tile." };
+  let link = null;   // a depot can also go on empty land next to a road or track; a short piece is laid to join it
+  if (!netFor(dk).hasRoad(x, y)) {
+    const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).find(n => inB(n.x, n.y) && netFor(dk).hasRoad(n.x, n.y) && !R.depotAt.has(key(n.x, n.y)) && (dk !== "rail" || railOwnerOf(key(n.x, n.y)) === owner));
+    if (!near) return { ok: false, reason: dk === "rail" ? "Build a train depot on or next to your track." : "Build a depot on or next to a road." };
+    const why = dk === "rail" ? canBuildTrackOn(x, y) : canBuildRoadOn(x, y);
+    if (why) return { ok: false, reason: why };
+    link = near;
+  }
   if (R.stationAt.has(key(x, y)) || R.depotAt.has(key(x, y))) return { ok: false, reason: "There is already a building here." };
   if (dk === "rail" && railOwnerOf(key(x, y)) !== owner) return { ok: false, reason: "That track belongs to another company." };
   const c = cost(dk === "rail" ? RAIL_DEPOT_COST : DEPOT_COST);
-  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const extra = link ? cost(dk === "rail" ? TRACK_COST : ROAD_COST) + (S.map.forest[key(x, y)] ? cost(CLEAR_TREE) : 0) : 0;
+  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c + extra) return { ok: false, reason: "Not enough money." }; }
+  if (link) { const r = dk === "rail" ? buildTrackTile(x, y, owner === "player") : buildRoadTile(x, y, owner === "player"); if (!r.ok) return r; if (dk === "rail" && owner !== "player") { if (!S.railOwner) S.railOwner = {}; S.railOwner[key(x, y)] = owner; } }
+  if (owner === "player") spend("construction", c);
   const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + (dk === "rail" ? " Train Depot" : " Depot"), x, y, kind: dk, owner };
   S.depots.push(d); R.depotAt.set(key(x, y), d);
   return { ok: true, depot: d, cost: c };
@@ -572,6 +594,24 @@ function bulldoze(x, y) {
     if (!road) { const sp = S.spans[i]; if (sp) delete S.spans[i]; m.occupied[i] = 0; }
     for (const v of S.vehicles.slice()) if (isTrain(v) && trainTiles(v).some(t => t.x === x && t.y === y)) removeVehicle(v);
     return { ok: true };
+  }
+  // houses and other town buildings
+  const b = R.bld.get(i);
+  if (b) {
+    const t = S.map.towns.find(tt => tt.buildings.includes(b)), floors = b.floors || 1, c = cost(250 + 150 * floors);
+    if (S.company.cash < c) return { ok: false, reason: "Not enough money. Demolishing this costs " + money(c) + "." };
+    if (t && townRating(t) < -400) return { ok: false, reason: "The " + t.name + " council will not allow it. Improve your rating first." };
+    spend("construction", c);
+    if (t) { t.buildings = t.buildings.filter(x => x !== b); t.population = Math.max(60, t.population - floors * 9); bumpRating(t, -60); }
+    R.bld.delete(i); m.occupied[i] = 0;
+    return { ok: true, removed: "building", cost: c };
+  }
+  // trees
+  if (m.forest[i] && !m.occupied[i] && !R.indAt.has(i)) {
+    const c = cost(CLEAR_TREE);
+    if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
+    spend("construction", c); treeCut(x, y); m.forest[i] = 0;
+    return { ok: true, removed: "tree", cost: c };
   }
   return { ok: false, reason: "Nothing to remove here." };
 }

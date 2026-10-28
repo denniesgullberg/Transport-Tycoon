@@ -195,15 +195,27 @@ function drawTrack(px, py, x, y, crossing) {
     if (sg.path) { ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(px + ox - 3, py + oy - 19); ctx.lineTo(px + ox + 3, py + oy - 19); ctx.lineTo(px + ox, py + oy - 23); ctx.fill(); }
   }
 }
+function drawPier(px, py, s) {
+  const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0), bx = px + d.x * 0.85, by = py + d.y * 0.85;
+  poly([px + d.x * 0.3 - 5, py + d.y * 0.3, px + d.x * 0.3 + 5, py + d.y * 0.3, bx + 5, by, bx - 5, by], "#8a6a3e");
+  ctx.fillStyle = "#5a4326"; for (const [ox, oy] of [[-0.25, 0], [0.25, 0], [0, -0.25], [0, 0.25]]) ctx.fillRect(bx + ox * TW - 1.5, by + oy * TH, 3, 7);
+  diamond(bx, by, "#9a7646", 0.55);
+  ctx.strokeStyle = "rgba(60,40,20,.4)"; ctx.lineWidth = 1;
+  for (const f of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.moveTo(bx - TW * 0.275 * (1 - Math.abs(f)), by + f * TH * 0.55); ctx.lineTo(bx + TW * 0.275 * (1 - Math.abs(f)), by + f * TH * 0.55); ctx.stroke(); }
+  const cx = px + d.x * 0.42, cy = py + d.y * 0.42;
+  ctx.strokeStyle = "#d6a82e"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - 28); ctx.lineTo(bx, by - 30); ctx.stroke();
+  ctx.strokeStyle = "#333"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx, by - 30); ctx.lineTo(bx, by - 16); ctx.stroke();
+  ctx.fillStyle = "#333"; ctx.fillRect(bx - 2, by - 16, 4, 3);
+}
 function drawStation(px, py, s, x, y) {
   const col = s.owner === "player" ? PLAYER_COLOR : s.owner === "public" ? "#777" : ((S.rivals.find(r => r.ai.id === s.owner) || {}).color || "#888");
   if (s.kind === "dock") {
     if (s.rigId) return;
+    // the shed on the shore; the pier and crane are drawn after the land so the shore does not hide them
     const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0);
-    ctx.strokeStyle = "#7a5a33"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + d.x * 0.7, py + d.y * 0.7); ctx.stroke();
-    box(px - 4, py, 0.5, 8, "#c9b48a", "#a8916a", "#8a7552");
-    ctx.strokeStyle = "#d6a82e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + 6, py); ctx.lineTo(px + 6, py - 22); ctx.lineTo(px + 6 + d.x * 0.5, py - 22 + d.y * 0.5); ctx.stroke();
-    ctx.fillStyle = col; ctx.fillRect(px - 9, py - 16, 10, 5);
+    box(px - d.x * 0.12, py - d.y * 0.12, 0.6, 12, "#c9b48a", "#a8916a", "#8a7552");
+    diamond(px - d.x * 0.12, py - d.y * 0.12 - 12, col, 0.3);
+    (R.docksLate || (R.docksLate = [])).push([px, py, s]);
     return;
   }
   if (s.kind === "airport") {
@@ -278,6 +290,7 @@ function draw() {
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
     }
   }
+  if (R.docksLate) { for (const [px, py, s] of R.docksLate) drawPier(px, py, s); R.docksLate = null; }
   // planned road or track while dragging
   if (ui.plan && ui.plan.tiles) for (const q of ui.plan.tiles) { if (!inB(q.x, q.y)) continue; const p = iso(q.x, q.y, tileH(q.x, q.y)); diamond(p.x, p.y, q.st === "bad" ? "rgba(220,60,40,.5)" : q.st === "have" ? "rgba(255,255,255,.22)" : "rgba(120,230,90,.5)", 0.9); }
   // hover / selected tile

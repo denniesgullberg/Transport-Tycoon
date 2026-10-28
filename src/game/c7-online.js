@@ -102,7 +102,7 @@ async function startRace() {
   return { ok: true };
 }
 function raceCfg() {
-  return { climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed || String(mapgen.randomSeed()), retireYears: 20, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names };
+  return { climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: Math.round(menuState.towns * Math.pow(menuState.size / 96, 1.5)), rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed || String(mapgen.randomSeed()), retireYears: 20, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names };
 }
 function startRaceGame(cfg) {
   startGame({ ...cfg, retireYears: cfg.retireYears || 20 });

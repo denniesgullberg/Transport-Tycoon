@@ -977,9 +977,10 @@ body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;r
     };
     const nElev = makeNoise(rng), nLake = makeNoise(rng), nForest = makeNoise(rng);
     const hillAmp = 2 + o.hills * 7;
+    const hillScale = 30 * Math.max(1, W / 128);
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const v = fbm(nElev, x / 30, y / 30, 4);
+        const v = fbm(nElev, x / hillScale, y / hillScale, 4);
         const e = Math.max(0, Math.min(1, (v - 0.47) / 0.28));
         height[at(x, y)] = Math.min(MAX_HEIGHT, Math.round(Math.pow(e, 1.3) * hillAmp));
       }
@@ -1041,11 +1042,12 @@ body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;r
       }
     }
     const lakeVal = new Float32Array(N);
+    const lakeScale = 12 * Math.max(1, W / 96);
     const low = [];
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = at(x, y);
-        lakeVal[i] = fbm(nLake, x / 12 + 100, y / 12 + 100, 3);
+        lakeVal[i] = fbm(nLake, x / lakeScale + 100, y / lakeScale + 100, 3);
         if (height[i] <= 2 && !protect[i]) low.push(lakeVal[i]);
       }
     }
@@ -1077,7 +1079,8 @@ body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;r
       }
       if (comp.length < 10) for (const j of comp) water[j] = 0;
     }
-    for (let r = 0; r < o.rivers; r++) {
+    const riverCount = Math.round(o.rivers * Math.max(1, W / 128));
+    for (let r = 0; r < riverCount; r++) {
       const cands = [];
       for (let y = 5; y < H - 5; y++) for (let x = 5; x < W - 5; x++) {
         const i = at(x, y);
@@ -2574,7 +2577,7 @@ body.mm-on #tut{right:128px}@media (max-width:420px){body.mm-on #tut{top:126px;r
         state.lowProduction[ind.id] = 0;
       }
     }
-    if (date.year > ctx.startYear && ctx.towns.length && rng() < 0.015) {
+    if (date.year > ctx.startYear && ctx.towns.length && rng() < 0.06) {
       const kinds = ["coalMine", "forest", "farm", "factory", "sawmill", "powerStation"];
       const kind = kinds[Math.floor(rng() * kinds.length)];
       const town = ctx.towns[Math.floor(rng() * ctx.towns.length)];
@@ -3311,6 +3314,7 @@ function newGame(cfg) {
   const settings = { ...DIFF[cfg.difficulty] };
   if (cfg.rivals != null) settings.rivals = cfg.rivals;
   const opts = { size: cfg.mapSize, towns: cfg.towns, ...CLIM[cfg.climate].map, climate: cfg.climate, names: cfg.names || (cfg.climate === "toyland" ? "silly" : "english") };
+  opts.industryScale = 1.6 * Math.max(1, Math.pow(cfg.mapSize / 96, 2));   // more industries, and more again on bigger maps
   if (cfg.water != null) opts.lakes = cfg.water;
   if (cfg.rivers != null) opts.rivers = cfg.rivers;
   const map = mapgen.generateMap(String(cfg.seed), opts);
@@ -3325,7 +3329,10 @@ function newGame(cfg) {
     qIncome: 0, quarterlyIncome: [], monthNet: [], bank: "ok", gameOver: false,
     rivals: [], roadTiles: [], railTiles: [], signals: {}, elec: {}, oneway: {}, townRating: {}, ads: {}, railOwner: {}, replace: { renew: false, rules: {} }, retireYear: cfg.retireYears ? cfg.startYear + cfg.retireYears : null, name: "Oakwood Transport",
   };
-  for (let i = 0; i < settings.rivals; i++) S.rivals.push({ ai: AI.createAi(i, settings.startingCash, 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] });
+  // rivals open for business a couple of years in, one after the other, so the player gets a head start
+  const delay = cfg.rivalDelay != null ? cfg.rivalDelay : 24;
+  S.rivalQueue = [];
+  for (let i = 0; i < settings.rivals; i++) { if (delay > 0) S.rivalQueue.push({ i, at: cfg.startYear * 12 + delay + i * 6 }); else addRival(i); }
   initRuntime();
   makeRigDocks(); rebuildSea();
   EV.addNews(S.news, S.date, "info", "Welcome to " + CLIM[cfg.climate].label + " valley. Build roads, stops and a depot, then buy a vehicle.");
@@ -3686,6 +3693,10 @@ function monthlyTick() {
   const reward = EV.checkObjectives(S.objectives, metricsNow(), S.date, S.news);
   if (reward) { S.company.cash += reward; post("other", reward); sound.play("cash"); }
   scenarioCheck();
+  // rivals whose start date has come
+  const nowM = S.date.year * 12 + S.date.month;
+  for (const q of (S.rivalQueue || []).filter(q => nowM >= q.at)) { const rv = addRival(q.i); EV.addNews(S.news, S.date, "info", rv.ai.name + " has started up and will compete with you."); }
+  if (S.rivalQueue) S.rivalQueue = S.rivalQueue.filter(q => nowM < q.at);
   // rivals plan
   const ends = mapgen.toEndpoints(m);
   for (const rv of S.rivals) {
@@ -3700,6 +3711,10 @@ function monthlyTick() {
   S.monthNet.push(Math.round(S.company.cash - before)); if (S.monthNet.length > 24) S.monthNet.shift();
   S.history.push({ year: S.date.year, month: S.date.month, income: S.lastIncome || 0, expenses: S.lastExpenses || 0, cash: Math.round(S.company.cash), loan: S.company.loan, cargoDelivered: S.metrics.cargo + S.metrics.passengers, vehicles: playerVehicles().length, companyValue: companyValue() });
   if (S.history.length > 240) S.history.shift();
+}
+function addRival(i) {
+  const rv = { ai: AI.createAi(i, Math.round(S.settings.startingCash * S.inflation), 0.4 + 0.2 * (i % 3)), color: RIVAL_COLORS[i % 4] };
+  S.rivals.push(rv); return rv;
 }
 function monthIncomeTrack(inc, exp) { S.lastIncome = inc; S.lastExpenses = exp; }
 
@@ -3786,11 +3801,21 @@ function placeStation(x, y, kind, owner) {
 }
 function placeDepot(x, y, dk, owner) {
   dk = dk || "road"; owner = owner || "player";
-  if (!netFor(dk).hasRoad(x, y)) return { ok: false, reason: dk === "rail" ? "Build a train depot on a track tile." : "Build a depot on a road tile." };
+  let link = null;   // a depot can also go on empty land next to a road or track; a short piece is laid to join it
+  if (!netFor(dk).hasRoad(x, y)) {
+    const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).find(n => inB(n.x, n.y) && netFor(dk).hasRoad(n.x, n.y) && !R.depotAt.has(key(n.x, n.y)) && (dk !== "rail" || railOwnerOf(key(n.x, n.y)) === owner));
+    if (!near) return { ok: false, reason: dk === "rail" ? "Build a train depot on or next to your track." : "Build a depot on or next to a road." };
+    const why = dk === "rail" ? canBuildTrackOn(x, y) : canBuildRoadOn(x, y);
+    if (why) return { ok: false, reason: why };
+    link = near;
+  }
   if (R.stationAt.has(key(x, y)) || R.depotAt.has(key(x, y))) return { ok: false, reason: "There is already a building here." };
   if (dk === "rail" && railOwnerOf(key(x, y)) !== owner) return { ok: false, reason: "That track belongs to another company." };
   const c = cost(dk === "rail" ? RAIL_DEPOT_COST : DEPOT_COST);
-  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  const extra = link ? cost(dk === "rail" ? TRACK_COST : ROAD_COST) + (S.map.forest[key(x, y)] ? cost(CLEAR_TREE) : 0) : 0;
+  if (owner === "player") { const no = councilRefuses(x, y); if (no) return { ok: false, reason: no }; if (S.company.cash < c + extra) return { ok: false, reason: "Not enough money." }; }
+  if (link) { const r = dk === "rail" ? buildTrackTile(x, y, owner === "player") : buildRoadTile(x, y, owner === "player"); if (!r.ok) return r; if (dk === "rail" && owner !== "player") { if (!S.railOwner) S.railOwner = {}; S.railOwner[key(x, y)] = owner; } }
+  if (owner === "player") spend("construction", c);
   const d = { id: "d" + (++S.ids.d), name: townOf(x, y).name + (dk === "rail" ? " Train Depot" : " Depot"), x, y, kind: dk, owner };
   S.depots.push(d); R.depotAt.set(key(x, y), d);
   return { ok: true, depot: d, cost: c };
@@ -3834,6 +3859,24 @@ function bulldoze(x, y) {
     if (!road) { const sp = S.spans[i]; if (sp) delete S.spans[i]; m.occupied[i] = 0; }
     for (const v of S.vehicles.slice()) if (isTrain(v) && trainTiles(v).some(t => t.x === x && t.y === y)) removeVehicle(v);
     return { ok: true };
+  }
+  // houses and other town buildings
+  const b = R.bld.get(i);
+  if (b) {
+    const t = S.map.towns.find(tt => tt.buildings.includes(b)), floors = b.floors || 1, c = cost(250 + 150 * floors);
+    if (S.company.cash < c) return { ok: false, reason: "Not enough money. Demolishing this costs " + money(c) + "." };
+    if (t && townRating(t) < -400) return { ok: false, reason: "The " + t.name + " council will not allow it. Improve your rating first." };
+    spend("construction", c);
+    if (t) { t.buildings = t.buildings.filter(x => x !== b); t.population = Math.max(60, t.population - floors * 9); bumpRating(t, -60); }
+    R.bld.delete(i); m.occupied[i] = 0;
+    return { ok: true, removed: "building", cost: c };
+  }
+  // trees
+  if (m.forest[i] && !m.occupied[i] && !R.indAt.has(i)) {
+    const c = cost(CLEAR_TREE);
+    if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
+    spend("construction", c); treeCut(x, y); m.forest[i] = 0;
+    return { ok: true, removed: "tree", cost: c };
   }
   return { ok: false, reason: "Nothing to remove here." };
 }
@@ -4177,13 +4220,30 @@ function makeRigDocks() {
 }
 
 // ---------------------------------------------------------------- docks and shipyards
+// Size of the open water a tile belongs to (counted up to a limit), so a dock faces the lake, not a pond.
+function waterReach(t, limit) {
+  const seen = new Set([key(t.x, t.y)]), q = [t];
+  for (let n = 0; n < q.length && seen.size < limit; n++) for (const [dx, dy] of DIR4) { const nx = q[n].x + dx, ny = q[n].y + dy, k = key(nx, ny); if (inB(nx, ny) && !seen.has(k) && R.sea.hasRoad(nx, ny)) { seen.add(k); q.push({ x: nx, y: ny }); } }
+  return seen.size;
+}
+function freeShore(x, y) { const k = key(x, y); return inB(x, y) && !S.map.water[k] && !S.map.occupied[k] && !R.roads.hasRoad(x, y) && !R.rail.hasRoad(x, y); }
 function placeDock(x, y, owner) {
-  owner = owner || "player"; const i = key(x, y), m = S.map;
-  if (!inB(x, y) || m.water[i]) return { ok: false, reason: "Build a dock on the shore, next to water." };
+  owner = owner || "player"; let i = key(x, y); const m = S.map;
+  let w = null;
+  if (inB(x, y) && m.water[i]) {
+    // tapped the water: put the dock on the free shore tile next to it
+    if (m.occupied[i]) return { ok: false, reason: "Something is built here." };
+    const land = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).find(t => freeShore(t.x, t.y));
+    if (!land) return { ok: false, reason: "Build a dock on the shore, next to water." };
+    w = { x, y }; x = land.x; y = land.y; i = key(x, y);
+  }
+  if (!inB(x, y)) return { ok: false, reason: "Build a dock on the shore, next to water." };
   if (m.occupied[i] || R.roads.hasRoad(x, y) || R.rail.hasRoad(x, y)) return { ok: false, reason: "Something is built here." };
-  const w = waterNeighbour(x, y); if (!w) return { ok: false, reason: "A dock needs open water next to it." };
+  if (!w) { const opts = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter(t => inB(t.x, t.y) && m.water[key(t.x, t.y)] && !m.occupied[key(t.x, t.y)]); w = opts.sort((a, b) => waterReach(b, 3000) - waterReach(a, 3000))[0] || null; }
+  if (!w) return { ok: false, reason: "A dock needs open water next to it." };
   const no = owner === "player" ? councilRefuses(x, y) : ""; if (no) return { ok: false, reason: no };
   const c = cost(2400); if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
+  if (m.forest[i]) m.forest[i] = 0;
   const s = ST.newStation("s" + (++S.ids.s), townOf(x, y).name + " Dock", "dock", x, y);
   s.owner = owner; s.water = w; s.tiles = [{ x, y }];
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);
@@ -4495,15 +4555,27 @@ function drawTrack(px, py, x, y, crossing) {
     if (sg.path) { ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(px + ox - 3, py + oy - 19); ctx.lineTo(px + ox + 3, py + oy - 19); ctx.lineTo(px + ox, py + oy - 23); ctx.fill(); }
   }
 }
+function drawPier(px, py, s) {
+  const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0), bx = px + d.x * 0.85, by = py + d.y * 0.85;
+  poly([px + d.x * 0.3 - 5, py + d.y * 0.3, px + d.x * 0.3 + 5, py + d.y * 0.3, bx + 5, by, bx - 5, by], "#8a6a3e");
+  ctx.fillStyle = "#5a4326"; for (const [ox, oy] of [[-0.25, 0], [0.25, 0], [0, -0.25], [0, 0.25]]) ctx.fillRect(bx + ox * TW - 1.5, by + oy * TH, 3, 7);
+  diamond(bx, by, "#9a7646", 0.55);
+  ctx.strokeStyle = "rgba(60,40,20,.4)"; ctx.lineWidth = 1;
+  for (const f of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.moveTo(bx - TW * 0.275 * (1 - Math.abs(f)), by + f * TH * 0.55); ctx.lineTo(bx + TW * 0.275 * (1 - Math.abs(f)), by + f * TH * 0.55); ctx.stroke(); }
+  const cx = px + d.x * 0.42, cy = py + d.y * 0.42;
+  ctx.strokeStyle = "#d6a82e"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - 28); ctx.lineTo(bx, by - 30); ctx.stroke();
+  ctx.strokeStyle = "#333"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx, by - 30); ctx.lineTo(bx, by - 16); ctx.stroke();
+  ctx.fillStyle = "#333"; ctx.fillRect(bx - 2, by - 16, 4, 3);
+}
 function drawStation(px, py, s, x, y) {
   const col = s.owner === "player" ? PLAYER_COLOR : s.owner === "public" ? "#777" : ((S.rivals.find(r => r.ai.id === s.owner) || {}).color || "#888");
   if (s.kind === "dock") {
     if (s.rigId) return;
+    // the shed on the shore; the pier and crane are drawn after the land so the shore does not hide them
     const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0);
-    ctx.strokeStyle = "#7a5a33"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + d.x * 0.7, py + d.y * 0.7); ctx.stroke();
-    box(px - 4, py, 0.5, 8, "#c9b48a", "#a8916a", "#8a7552");
-    ctx.strokeStyle = "#d6a82e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + 6, py); ctx.lineTo(px + 6, py - 22); ctx.lineTo(px + 6 + d.x * 0.5, py - 22 + d.y * 0.5); ctx.stroke();
-    ctx.fillStyle = col; ctx.fillRect(px - 9, py - 16, 10, 5);
+    box(px - d.x * 0.12, py - d.y * 0.12, 0.6, 12, "#c9b48a", "#a8916a", "#8a7552");
+    diamond(px - d.x * 0.12, py - d.y * 0.12 - 12, col, 0.3);
+    (R.docksLate || (R.docksLate = [])).push([px, py, s]);
     return;
   }
   if (s.kind === "airport") {
@@ -4578,6 +4650,7 @@ function draw() {
       const ind = R.indAt.get(i); if (ind) drawIndustry(p.x, p.y, ind);
     }
   }
+  if (R.docksLate) { for (const [px, py, s] of R.docksLate) drawPier(px, py, s); R.docksLate = null; }
   // planned road or track while dragging
   if (ui.plan && ui.plan.tiles) for (const q of ui.plan.tiles) { if (!inB(q.x, q.y)) continue; const p = iso(q.x, q.y, tileH(q.x, q.y)); diamond(p.x, p.y, q.st === "bad" ? "rgba(220,60,40,.5)" : q.st === "have" ? "rgba(255,255,255,.22)" : "rgba(120,230,90,.5)", 0.9); }
   // hover / selected tile
@@ -4715,13 +4788,13 @@ const TOOLS = [
   ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to paint a road."],
   ["busStop", "Bus stop", () => "Bus stop: " + money(cost(STATION_COST)) + ". Tap a road tile near houses. Its catchment is highlighted."],
   ["truckStop", "Truck stop", () => "Truck stop: " + money(cost(STATION_COST)) + ". Tap a road tile within 3 tiles of a mine, farm, forest or factory."],
-  ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile. Vehicles are bought and serviced here."],
+  ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile or the land beside one. Vehicles are bought and serviced here."],
   ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
-  ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile. Trains are built and serviced here."],
+  ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile or the land beside one. Trains are built and serviced here."],
   ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Each tap changes it: block one way, turned round, two-way, path signal one way, turned round, off."],
   ["electrify", "Electrify", () => "Electrify: " + money(cost(ELEC_COST)) + " per tile. Drag over track. Electric locomotives only run on electrified track."],
-  ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap a shore tile next to open water. Ships load and unload here."],
+  ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap the shore or the water beside it. Ships load and unload here."],
   ["shipyard", "Shipyard", () => "Shipyard: " + money(cost(3500)) + ". Tap open water next to the shore. Ships are built here."],
   ["airport", "Airport", () => "Small airport: " + money(cost(AIRPORTS.small.cost)) + ", 2 x 2 tiles. Tap the top corner of flat, clear land. Propeller planes only."],
   ["airportL", "City airport", () => "City airport: " + money(cost(AIRPORTS.large.cost)) + ", 3 x 3 tiles, from " + AIRPORTS.large.year + ". Jets need one at both ends."],
@@ -4729,7 +4802,7 @@ const TOOLS = [
   ["bridge", "Bridge", "Tap the last road or track tile before water or a hill. A bridge or tunnel is built to the far side at the same height."],
   ["raise", "Raise land", () => "Raise land: about " + money(cost(250)) + " per tile. Neighbours follow to keep slopes gentle."],
   ["lower", "Lower land", () => "Lower land: about " + money(cost(250)) + " per tile."],
-  ["bulldoze", "Bulldoze", () => "Bulldoze: " + money(cost(BULLDOZE)) + ". Removes roads, stops and depots."],
+  ["bulldoze", "Bulldoze", () => "Bulldoze: " + money(cost(BULLDOZE)) + ". Removes roads, track, stops, depots, houses and trees. Houses cost more and upset the town."],
 ];
 function buildToolbar() {
   const tb = $("#tools"); tb.innerHTML = "";
@@ -5121,6 +5194,7 @@ function orderWarnings(vh) {
     if (!stops.some(x => x.o.load !== "none" && producesAt(x.s, vh.cargo))) out.push("None of these stops has " + vh.cargo + " to pick up.");
     if (!stops.some(x => x.o.unload !== "none" && acceptsAt(x.s, vh.cargo))) out.push("None of these stops accepts " + vh.cargo + ", so nothing gets paid.");
   }
+  if (isShip(vh) && R.sea) for (const x of stops) if (x.s.water && !R.sea.connected(vh.tile, x.s.water)) out.push(x.s.name + " is on other water. This ship cannot sail there.");
   for (const x of stops) if (x.o.load === "full" && !producesAt(x.s, vh.cargo)) out.push("Full load at " + x.s.name + " will wait a long time: there is no " + vh.cargo + " there.");
   return out;
 }
@@ -5789,11 +5863,11 @@ function takeOver(rv) {
 
 // ------------------------------------------------------------------- scenarios
 const SCENARIOS = [
-  { id: "coal", name: "Coal Country", blurb: "A hilly valley full of mines. Haul 20,000 tonnes of cargo by 1965.", cfg: { climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed: "coal-country" }, goal: { text: "Deliver 20,000 tonnes of cargo", metric: "cargo", target: 20000, byYear: 1965 } },
-  { id: "commuter", name: "Commuter Belt", blurb: "Many towns close together. Carry 60,000 passengers by 1972.", cfg: { climate: "temperate", difficulty: "easy", mapSize: 96, towns: 26, rivals: 2, startYear: 1955, seed: "commuter-belt" }, goal: { text: "Carry 60,000 passengers", metric: "passengers", target: 60000, byYear: 1972 } },
-  { id: "iron", name: "Iron Horse", blurb: "Build a railway empire. Reach a company value of £2,000,000 by 1980.", cfg: { climate: "temperate", difficulty: "medium", mapSize: 128, towns: 18, rivals: 2, startYear: 1950, seed: "iron-horse" }, goal: { text: "Reach a company value of £2,000,000", metric: "companyValue", target: 2000000, byYear: 1980 } },
-  { id: "north", name: "Frozen North", blurb: "Hard winters, tight money. Connect 8 towns by 1975.", cfg: { climate: "arctic", difficulty: "hard", mapSize: 96, towns: 16, rivals: 2, startYear: 1955, seed: "frozen-north" }, goal: { text: "Connect 8 towns", metric: "townsConnected", target: 8, byYear: 1975 } },
-  { id: "toys", name: "Toy Trains", blurb: "A bright and easy start. Make £250,000 profit in a year by 1985.", cfg: { climate: "toyland", difficulty: "easy", mapSize: 96, towns: 16, rivals: 1, startYear: 1960, seed: "toy-trains" }, goal: { text: "Make £250,000 profit in a year", metric: "yearlyProfit", target: 250000, byYear: 1985 } },
+  { id: "coal", name: "Coal Country", blurb: "A hilly valley full of mines. Haul 20,000 tonnes of cargo by 1965.", cfg: { climate: "temperate", difficulty: "medium", mapSize: 192, towns: 35, rivals: 1, startYear: 1950, seed: "coal-country" }, goal: { text: "Deliver 20,000 tonnes of cargo", metric: "cargo", target: 20000, byYear: 1965 } },
+  { id: "commuter", name: "Commuter Belt", blurb: "Many towns close together. Carry 60,000 passengers by 1972.", cfg: { climate: "temperate", difficulty: "easy", mapSize: 192, towns: 65, rivals: 2, startYear: 1955, seed: "commuter-belt" }, goal: { text: "Carry 60,000 passengers", metric: "passengers", target: 60000, byYear: 1972 } },
+  { id: "iron", name: "Iron Horse", blurb: "Build a railway empire. Reach a company value of £2,000,000 by 1980.", cfg: { climate: "temperate", difficulty: "medium", mapSize: 256, towns: 45, rivals: 2, startYear: 1950, seed: "iron-horse" }, goal: { text: "Reach a company value of £2,000,000", metric: "companyValue", target: 2000000, byYear: 1980 } },
+  { id: "north", name: "Frozen North", blurb: "Hard winters, tight money. Connect 8 towns by 1975.", cfg: { climate: "arctic", difficulty: "hard", mapSize: 192, towns: 40, rivals: 2, startYear: 1955, seed: "frozen-north" }, goal: { text: "Connect 8 towns", metric: "townsConnected", target: 8, byYear: 1975 } },
+  { id: "toys", name: "Toy Trains", blurb: "A bright and easy start. Make £250,000 profit in a year by 1985.", cfg: { climate: "toyland", difficulty: "easy", mapSize: 192, towns: 40, rivals: 1, startYear: 1960, seed: "toy-trains" }, goal: { text: "Make £250,000 profit in a year", metric: "yearlyProfit", target: 250000, byYear: 1985 } },
 ];
 function startScenario(id) {
   const sc = SCENARIOS.find(s => s.id === id); if (!sc) return false;
@@ -6079,7 +6153,7 @@ async function startRace() {
   return { ok: true };
 }
 function raceCfg() {
-  return { climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed || String(mapgen.randomSeed()), retireYears: 20, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names };
+  return { climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: Math.round(menuState.towns * Math.pow(menuState.size / 96, 1.5)), rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed || String(mapgen.randomSeed()), retireYears: 20, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names };
 }
 function startRaceGame(cfg) {
   startGame({ ...cfg, retireYears: cfg.retireYears || 20 });
@@ -6152,7 +6226,7 @@ function afterStart() {
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
 
-const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
+const menuState = { climate: "temperate", difficulty: "medium", size: 192, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
 function showMenu(first) {
   ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
@@ -6167,7 +6241,7 @@ function showMenu(first) {
   else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
     "<label>Difficulty</label><div class='chips'>" + opt("difficulty", "easy", "Easy") + opt("difficulty", "medium", "Medium") + opt("difficulty", "hard", "Hard") + "</div>" +
-    "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + opt("size", 160, "Huge") + "</div>" +
+    "<label>Map size</label><div class='chips'>" + opt("size", 128, "Small") + opt("size", 192, "Medium") + opt("size", 256, "Large") + opt("size", 320, "Huge") + "</div>" +
     "<label>Water</label><div class='chips'>" + opt("water", "d", "Dry") + opt("water", "n", "Normal") + opt("water", "w", "Lots of lakes") + "</div>" +
     "<label>Rivers</label><div class='chips'>" + opt("rivers", 0, "None") + opt("rivers", 2, "Some") + opt("rivers", 4, "Many") + "</div>" +
     "<label>Town names</label><div class='chips'>" + opt("names", "auto", "Match climate") + opt("names", "english", "English") + opt("names", "swedish", "Swedish") + opt("names", "german", "German") + opt("names", "french", "French") + opt("names", "silly", "Silly") + "</div>" +
@@ -6188,7 +6262,7 @@ function showMenu(first) {
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
+      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: Math.round(menuState.towns * Math.pow(menuState.size / 96, 1.5)), rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();
@@ -6566,7 +6640,7 @@ const TESTS = [
     const out = simulateDays(240); assert(out.pax > 0, "passengers delivered: " + JSON.stringify(out)); assert(S.vehicles[0].profit.thisYear + S.vehicles[0].profit.lastYear > 0, "bus earned income");
   }],
   ["game", "Game over, loading and a rival company over several years", () => {
-    startGame({ climate: "arctic", difficulty: "medium", mapSize: 64, towns: 10, rivals: 2, startYear: 1950, seed: "77" });
+    startGame({ climate: "arctic", difficulty: "medium", mapSize: 64, towns: 10, rivals: 2, rivalDelay: 0, startYear: 1950, seed: "77" });
     simulateDays(365 * 3); assert(S.rivals.some(r => r.ai.routes.length > 0), "a rival built a route in 3 years"); assert(S.history.length >= 30, "monthly history recorded");
     saveNow(SLOT); const date = JSON.stringify(S.date); const cash = Math.round(S.company.cash); simulateDays(40); assert(loadSlot(SLOT), "load"); eq(JSON.stringify(S.date), date, "date restored"); eq(Math.round(S.company.cash), cash, "cash restored");
     simulateDays(60); 
@@ -6918,7 +6992,7 @@ const TESTS = [
   ["rivals", "Rivals build their own railways and compete; their track is off limits", () => {
     let rv = null;
     for (const seed of ["11", "12", "13", "14", "15", "16"]) {
-      startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed });
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, rivalDelay: 0, startYear: 1950, seed });
       rv = S.rivals[0]; rv.ai.cash = 2000000; const keep = rng;
       for (let k = 0; k < 40 && !(rv.rail && rv.rail.length); k++) rivalRailMonth(rv);
       if (rv.rail && rv.rail.length) break;
@@ -6934,7 +7008,7 @@ const TESTS = [
   }],
   ["rivals", "Buy shares; 100% takes the rival over", () => {
     let rv = null;
-    for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed }); simulateDays(400); rv = S.rivals[0]; if (S.vehicles.some(v => v.owner === rv.ai.id)) break; }
+    for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, rivalDelay: 0, startYear: 1950, seed }); simulateDays(400); rv = S.rivals[0]; if (S.vehicles.some(v => v.owner === rv.ai.id)) break; }
     S.company.cash = 50000000; const p = sharePrice(rv); assert(p >= 5000, "share price");
     assert(buyShare(rv).ok && rv.shares === 1, "bought 25%"); assert(sellShare(rv).ok && rv.shares === 0, "sold");
     const fleet = S.vehicles.filter(v => v.owner === rv.ai.id).length;
@@ -7079,7 +7153,7 @@ const TESTS = [
   ["rivals", "Rivals start tanker and air routes", () => {
     let rv = null, ok = false;
     for (const seed of ["11", "12", "13", "14", "15", "16", "17", "18"]) {
-      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, startYear: 1960, seed, water: 0.85 });
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, rivalDelay: 0, startYear: 1960, seed, water: 0.85 });
       rv = S.rivals[0]; rv.ai.cash = 5e6; const keep = rng;
       for (let k = 0; k < 80 && !((rv.sea || 0) && (rv.air || 0)); k++) rivalSeaAirMonth(rv);
       if ((rv.sea || 0) && (rv.air || 0)) { ok = true; break; }
@@ -7130,6 +7204,74 @@ const TESTS = [
     })();
     window.__asyncTests = (window.__asyncTests || []).concat([p]);
   }],
+  ["map", "Bigger maps with more industries and bigger lakes", () => {
+    startGame({ climate: "temperate", difficulty: "medium", mapSize: 256, towns: 79, rivals: 0, startYear: 1950, seed: "big" });
+    eq(S.map.w, 256, "map width"); assert(S.map.towns.length >= 60, "towns: " + S.map.towns.length);
+    assert(S.map.industries.length >= 80, "industries: " + S.map.industries.length);
+    let big = 0; const seen = new Uint8Array(S.map.w * S.map.h);
+    for (let k = 0; k < seen.length; k++) if (S.map.water[k] && !seen[k]) { let n = 0; const q = [k]; seen[k] = 1; while (q.length) { const j = q.pop(); n++; const x = j % S.map.w, y = (j / S.map.w) | 0; for (const [dx, dy] of DIR4) { const nx = x + dx, ny = y + dy; if (inB(nx, ny) && S.map.water[key(nx, ny)] && !seen[key(nx, ny)]) { seen[key(nx, ny)] = 1; q.push(key(nx, ny)); } } } big = Math.max(big, n); }
+    assert(big >= 300, "a lake big enough for ships: " + big);
+    simulateDays(30);
+  }],
+  ["map", "Start menu offers the larger map sizes", () => {
+    closeAllWins(); menuState.view = "new"; showMenu(); const m = document.querySelector("#menu"); assert(m, "menu");
+    for (const n of ["128", "192", "256", "320"]) assert(m.querySelector("[data-g='size'][data-v='" + n + "']"), "size " + n);
+    hideMenu();
+  }],
+  ["rivals", "Rivals start trading two years in, one after the other", () => {
+    startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 2, startYear: 1950, seed: "11" });
+    eq(S.rivals.length, 0, "no rivals at the start"); eq(S.rivalQueue.length, 2, "two waiting");
+    simulateDays(700); eq(S.rivals.length, 0, "still none after 23 months");
+    simulateDays(60); eq(S.rivals.length, 1, "first after two years");
+    assert(S.news.items.some(n => /has started up/.test(n.text)), "news");
+    simulateDays(190); eq(S.rivals.length, 2, "second six months later"); eq(S.rivalQueue.length, 0, "queue empty");
+    simulateDays(365); assert(S.rivals.some(r => r.ai.routes.length > 0), "they build routes");
+  }],
+  ["build", "Depots go on or next to a road or track", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "11" });
+    S.company.cash = 900000; const m = S.map;
+    let spot = null;
+    for (const r of R.roads.tiles()) { for (const [dx, dy] of DIR4) { const x = r.x + dx, y = r.y + dy; if (inB(x, y) && !m.water[key(x, y)] && !m.occupied[key(x, y)] && !R.roads.hasRoad(x, y) && !R.rail.hasRoad(x, y) && !councilRefuses(x, y)) { spot = { x, y, from: r }; break; } } if (spot) break; }
+    assert(spot, "land beside a road"); const cash = S.company.cash;
+    const d = placeDepot(spot.x, spot.y); assert(d.ok, d.reason); assert(R.roads.hasRoad(spot.x, spot.y), "a road piece under the depot");
+    assert(R.roads.connected(spot, spot.from), "joined to the road"); assert(S.company.cash < cash - d.cost, "the road piece was paid for");
+    const bus = V.availableModels(1950, "bus")[0]; assert(buyVehicle(bus.id, d.depot).ok, "bus bought there");
+    // nowhere near a road: refused
+    let far = null; for (let y = 2; y < m.h - 2 && !far; y++) for (let x = 2; x < m.w - 2 && !far; x++) { let ok = !m.water[key(x, y)] && !m.occupied[key(x, y)]; for (const [dx, dy] of DIR4) if (R.roads.hasRoad(x + dx, y + dy) || R.rail.hasRoad(x + dx, y + dy)) ok = false; if (ok && !R.roads.hasRoad(x, y)) far = { x, y }; }
+    assert(!placeDepot(far.x, far.y).ok, "not out in a field");
+    // train depot beside track
+    const a = far; let t0 = null; for (let y = 3; y < m.h - 3 && !t0; y++) for (let x = 3; x < m.w - 6 && !t0; x++) { let ok = true; for (let dy = -1; dy <= 1; dy++) for (let dx = 0; dx <= 4; dx++) if (m.water[key(x + dx, y + dy)] || m.occupied[key(x + dx, y + dy)] || R.roads.hasRoad(x + dx, y + dy)) ok = false; if (ok) t0 = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(t0.x + k, t0.y);
+    const td = placeDepot(t0.x + 1, t0.y + 1, "rail"); assert(td.ok, td.reason); assert(R.rail.connected({ x: t0.x + 1, y: t0.y + 1 }, { x: t0.x + 3, y: t0.y }), "train depot joined to the track");
+  }],
+  ["build", "Bulldoze removes houses and trees", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "11" });
+    S.company.cash = 900000; const m = S.map, t = m.towns[0], b = t.buildings[0], pop = t.population, rate = townRating(t), n = t.buildings.length;
+    const r = bulldoze(b.x, b.y); assert(r.ok && r.removed === "building", r.reason);
+    eq(t.buildings.length, n - 1, "house gone"); assert(t.population < pop, "fewer people"); assert(townRating(t) < rate, "town not pleased");
+    assert(!R.bld.has(key(b.x, b.y)) && !m.occupied[key(b.x, b.y)], "tile free"); assert(buildRoadTile(b.x, b.y).ok, "can build there now");
+    let tree = -1; for (let k = 0; k < m.w * m.h; k++) if (m.forest[k] && !m.occupied[k] && !m.water[k]) { tree = k; break; }
+    assert(tree >= 0, "a tree"); const tx = tree % m.w, ty = (tree / m.w) | 0;
+    const r2 = bulldoze(tx, ty); assert(r2.ok && r2.removed === "tree", r2.reason); assert(!m.forest[tree], "tree gone");
+    assert(!bulldoze(tx, ty).ok, "nothing left to remove");
+    const ind = m.industries[0]; assert(!bulldoze(ind.x, ind.y).ok, "industries stay");
+  }],
+  ["water", "Docks: tap the shore or the water; ships on other water get a warning", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15", "16"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed, water: 0.85 }); d = buildDemoShip(); if (d.ok) break; }
+    assert(d.ok, "a tanker line"); const m = S.map; S.company.cash = 900000;
+    // a free water tile with free shore beside it, on the same water as the tanker
+    let w = null; for (const t of R.sea.tiles()) { if (m.occupied[key(t.x, t.y)] || S.stations.some(s => s.water && sameT(s.water, t)) || !R.sea.connected(t, d.dock.water)) continue; if (DIR4.some(([dx, dy]) => freeShore(t.x + dx, t.y + dy))) { w = t; break; } }
+    assert(w, "shore");
+    const r = placeDock(w.x, w.y); assert(r.ok, r.reason); assert(sameT(r.station.water, w), "the tapped water is the dock's berth"); assert(!m.water[key(r.station.x, r.station.y)], "dock on land");
+    eq(orderWarnings(d.vh).filter(x => /other water/.test(x)).length, 0, "no warning on the same water");
+    simulateDays(200); assert(d.vh.trips >= 2, "tanker docks at both ends: " + d.vh.trips);
+    // a dock on a different lake
+    const other = S.stations.find(s => s.kind === "dock" && s.water && !R.sea.connected(s.water, d.dock.water));
+    let lake = null; if (!other) for (const t of R.sea.tiles()) { if (!R.sea.connected(t, d.dock.water) && !m.occupied[key(t.x, t.y)] && DIR4.some(([dx, dy]) => freeShore(t.x + dx, t.y + dy))) { lake = placeDock(t.x, t.y); if (lake.ok) break; } }
+    const far = other || (lake && lake.ok && lake.station);
+    if (far) { addStopTo(d.vh, far.id); assert(orderWarnings(d.vh).some(x => /other water/.test(x)), "warned about other water"); }
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;
@@ -7173,7 +7315,7 @@ function testsWin() {
   });
 }
 
-window.__TT_DEBUG = { get S(){return S}, get R(){return R}, runTests, buildDemoRoute, demoLine, buildDemoShip, buildDemoAir, simulateDays, startGame, buyVehicle, TESTS, centerOn, view, ui };
+window.__TT_DEBUG = { get S(){return S}, get R(){return R}, runTests, buildDemoRoute, demoLine, buildDemoShip, buildDemoAir, simulateDays, startGame, buyVehicle, TESTS, centerOn, view, ui, run: (src) => eval(src) };
 boot();
 })();
 </script>

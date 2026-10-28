@@ -36,6 +36,7 @@ function orderWarnings(vh) {
     if (!stops.some(x => x.o.load !== "none" && producesAt(x.s, vh.cargo))) out.push("None of these stops has " + vh.cargo + " to pick up.");
     if (!stops.some(x => x.o.unload !== "none" && acceptsAt(x.s, vh.cargo))) out.push("None of these stops accepts " + vh.cargo + ", so nothing gets paid.");
   }
+  if (isShip(vh) && R.sea) for (const x of stops) if (x.s.water && !R.sea.connected(vh.tile, x.s.water)) out.push(x.s.name + " is on other water. This ship cannot sail there.");
   for (const x of stops) if (x.o.load === "full" && !producesAt(x.s, vh.cargo)) out.push("Full load at " + x.s.name + " will wait a long time: there is no " + vh.cargo + " there.");
   return out;
 }

@@ -223,9 +223,10 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
   // 1. Hills -----------------------------------------------------------------
   const nElev = makeNoise(rng), nLake = makeNoise(rng), nForest = makeNoise(rng);
   const hillAmp = 2 + o.hills * 7;
+  const hillScale = 30 * Math.max(1, W / 128);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const v = fbm(nElev, x / 30, y / 30, 4);
+      const v = fbm(nElev, x / hillScale, y / hillScale, 4);
       const e = Math.max(0, Math.min(1, (v - 0.47) / 0.28));
       height[at(x, y)] = Math.min(MAX_HEIGHT, Math.round(Math.pow(e, 1.3) * hillAmp));
     }
@@ -290,11 +291,12 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
 
   // 2. Lakes (only in low ground) -------------------------------------------
   const lakeVal = new Float32Array(N);
+  const lakeScale = 12 * Math.max(1, W / 96);   // bigger maps get bigger lakes, so ships have room
   const low: number[] = [];
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = at(x, y);
-      lakeVal[i] = fbm(nLake, x / 12 + 100, y / 12 + 100, 3);
+      lakeVal[i] = fbm(nLake, x / lakeScale + 100, y / lakeScale + 100, 3);
       if (height[i] <= 2 && !protect[i]) low.push(lakeVal[i]);
     }
   }
@@ -323,7 +325,8 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
   }
 
   // 3. Rivers ---------------------------------------------------------------
-  for (let r = 0; r < o.rivers; r++) {
+  const riverCount = Math.round(o.rivers * Math.max(1, W / 128));
+  for (let r = 0; r < riverCount; r++) {
     const cands: number[] = [];
     for (let y = 5; y < H - 5; y++) for (let x = 5; x < W - 5; x++) {
       const i = at(x, y);

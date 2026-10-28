@@ -22,7 +22,7 @@ function afterStart() {
 function startGame(cfg) { newGame(cfg); closeAllWins(); hideMenu(); afterStart(); }
 function startGameFromMenu(cfg) { startGame(cfg); if (!prefs.tutorialDone) tutorialStart(); }
 
-const menuState = { climate: "temperate", difficulty: "medium", size: 96, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
+const menuState = { climate: "temperate", difficulty: "medium", size: 192, towns: 18, rivals: 2, year: 1950, seed: "", retire: 0, view: "new", water: "n", rivers: 2, names: "auto" };
 function showMenu(first) {
   ui.menuOpen = true; document.body.classList.add("menu-open");
   const m = $("#menu"); m.hidden = false;
@@ -37,7 +37,7 @@ function showMenu(first) {
   else view =
     "<div class='clim'>" + Object.keys(CLIM).map(k => "<button class='ct " + (menuState.climate === k ? "on" : "") + "' data-g='climate' data-v='" + k + "'><i style='background:linear-gradient(135deg," + CLIM[k].grass + " 55%," + CLIM[k].water + " 55%)'></i>" + CLIM[k].label + "</button>").join("") + "</div>" +
     "<label>Difficulty</label><div class='chips'>" + opt("difficulty", "easy", "Easy") + opt("difficulty", "medium", "Medium") + opt("difficulty", "hard", "Hard") + "</div>" +
-    "<label>Map size</label><div class='chips'>" + opt("size", 64, "Small") + opt("size", 96, "Medium") + opt("size", 128, "Large") + opt("size", 160, "Huge") + "</div>" +
+    "<label>Map size</label><div class='chips'>" + opt("size", 128, "Small") + opt("size", 192, "Medium") + opt("size", 256, "Large") + opt("size", 320, "Huge") + "</div>" +
     "<label>Water</label><div class='chips'>" + opt("water", "d", "Dry") + opt("water", "n", "Normal") + opt("water", "w", "Lots of lakes") + "</div>" +
     "<label>Rivers</label><div class='chips'>" + opt("rivers", 0, "None") + opt("rivers", 2, "Some") + opt("rivers", 4, "Many") + "</div>" +
     "<label>Town names</label><div class='chips'>" + opt("names", "auto", "Match climate") + opt("names", "english", "English") + opt("names", "swedish", "Swedish") + opt("names", "german", "German") + opt("names", "french", "French") + opt("names", "silly", "Silly") + "</div>" +
@@ -58,7 +58,7 @@ function showMenu(first) {
     if (a === "dice") { menuState.seed = String(mapgen.randomSeed()); $("#seed").value = menuState.seed; }
     if (a === "start") {
       menuState.seed = $("#seed").value.trim() || String(mapgen.randomSeed());
-      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: menuState.towns, rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
+      startGameFromMenu({ climate: menuState.climate, difficulty: menuState.difficulty, mapSize: menuState.size, towns: Math.round(menuState.towns * Math.pow(menuState.size / 96, 1.5)), rivals: menuState.rivals, startYear: menuState.year, seed: menuState.seed, retireYears: menuState.retire, water: ({ d: 0.15, n: null, w: 0.85 })[menuState.water], rivers: menuState.rivers, names: menuState.names === "auto" ? null : menuState.names });
     }
     if (a === "continue") { const last = savesList()[0]; if (last) { let st = null; try { st = SV.loadGame(last.slot); } catch (e) { st = null; } if (st && startLoaded(st)) toast("Loaded " + (last.slot === AUTO ? "autosave" : last.label.split(" · ")[0]) + "."); } }
     if (a === "saves") savesWin();

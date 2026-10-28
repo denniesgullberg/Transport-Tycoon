@@ -139,7 +139,7 @@ const TESTS = [
     const out = simulateDays(240); assert(out.pax > 0, "passengers delivered: " + JSON.stringify(out)); assert(S.vehicles[0].profit.thisYear + S.vehicles[0].profit.lastYear > 0, "bus earned income");
   }],
   ["game", "Game over, loading and a rival company over several years", () => {
-    startGame({ climate: "arctic", difficulty: "medium", mapSize: 64, towns: 10, rivals: 2, startYear: 1950, seed: "77" });
+    startGame({ climate: "arctic", difficulty: "medium", mapSize: 64, towns: 10, rivals: 2, rivalDelay: 0, startYear: 1950, seed: "77" });
     simulateDays(365 * 3); assert(S.rivals.some(r => r.ai.routes.length > 0), "a rival built a route in 3 years"); assert(S.history.length >= 30, "monthly history recorded");
     saveNow(SLOT); const date = JSON.stringify(S.date); const cash = Math.round(S.company.cash); simulateDays(40); assert(loadSlot(SLOT), "load"); eq(JSON.stringify(S.date), date, "date restored"); eq(Math.round(S.company.cash), cash, "cash restored");
     simulateDays(60); 
@@ -491,7 +491,7 @@ const TESTS = [
   ["rivals", "Rivals build their own railways and compete; their track is off limits", () => {
     let rv = null;
     for (const seed of ["11", "12", "13", "14", "15", "16"]) {
-      startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed });
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, rivalDelay: 0, startYear: 1950, seed });
       rv = S.rivals[0]; rv.ai.cash = 2000000; const keep = rng;
       for (let k = 0; k < 40 && !(rv.rail && rv.rail.length); k++) rivalRailMonth(rv);
       if (rv.rail && rv.rail.length) break;
@@ -507,7 +507,7 @@ const TESTS = [
   }],
   ["rivals", "Buy shares; 100% takes the rival over", () => {
     let rv = null;
-    for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, startYear: 1950, seed }); simulateDays(400); rv = S.rivals[0]; if (S.vehicles.some(v => v.owner === rv.ai.id)) break; }
+    for (const seed of ["11", "12", "13"]) { startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 1, rivalDelay: 0, startYear: 1950, seed }); simulateDays(400); rv = S.rivals[0]; if (S.vehicles.some(v => v.owner === rv.ai.id)) break; }
     S.company.cash = 50000000; const p = sharePrice(rv); assert(p >= 5000, "share price");
     assert(buyShare(rv).ok && rv.shares === 1, "bought 25%"); assert(sellShare(rv).ok && rv.shares === 0, "sold");
     const fleet = S.vehicles.filter(v => v.owner === rv.ai.id).length;
@@ -652,7 +652,7 @@ const TESTS = [
   ["rivals", "Rivals start tanker and air routes", () => {
     let rv = null, ok = false;
     for (const seed of ["11", "12", "13", "14", "15", "16", "17", "18"]) {
-      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, startYear: 1960, seed, water: 0.85 });
+      startGame({ climate: "temperate", difficulty: "medium", mapSize: 128, towns: 16, rivals: 1, rivalDelay: 0, startYear: 1960, seed, water: 0.85 });
       rv = S.rivals[0]; rv.ai.cash = 5e6; const keep = rng;
       for (let k = 0; k < 80 && !((rv.sea || 0) && (rv.air || 0)); k++) rivalSeaAirMonth(rv);
       if ((rv.sea || 0) && (rv.air || 0)) { ok = true; break; }
@@ -702,6 +702,74 @@ const TESTS = [
       ONLINE.race = null; ONLINE.peers = []; ONLINE.started = false;
     })();
     window.__asyncTests = (window.__asyncTests || []).concat([p]);
+  }],
+  ["map", "Bigger maps with more industries and bigger lakes", () => {
+    startGame({ climate: "temperate", difficulty: "medium", mapSize: 256, towns: 79, rivals: 0, startYear: 1950, seed: "big" });
+    eq(S.map.w, 256, "map width"); assert(S.map.towns.length >= 60, "towns: " + S.map.towns.length);
+    assert(S.map.industries.length >= 80, "industries: " + S.map.industries.length);
+    let big = 0; const seen = new Uint8Array(S.map.w * S.map.h);
+    for (let k = 0; k < seen.length; k++) if (S.map.water[k] && !seen[k]) { let n = 0; const q = [k]; seen[k] = 1; while (q.length) { const j = q.pop(); n++; const x = j % S.map.w, y = (j / S.map.w) | 0; for (const [dx, dy] of DIR4) { const nx = x + dx, ny = y + dy; if (inB(nx, ny) && S.map.water[key(nx, ny)] && !seen[key(nx, ny)]) { seen[key(nx, ny)] = 1; q.push(key(nx, ny)); } } } big = Math.max(big, n); }
+    assert(big >= 300, "a lake big enough for ships: " + big);
+    simulateDays(30);
+  }],
+  ["map", "Start menu offers the larger map sizes", () => {
+    closeAllWins(); menuState.view = "new"; showMenu(); const m = document.querySelector("#menu"); assert(m, "menu");
+    for (const n of ["128", "192", "256", "320"]) assert(m.querySelector("[data-g='size'][data-v='" + n + "']"), "size " + n);
+    hideMenu();
+  }],
+  ["rivals", "Rivals start trading two years in, one after the other", () => {
+    startGame({ climate: "temperate", difficulty: "medium", mapSize: 96, towns: 14, rivals: 2, startYear: 1950, seed: "11" });
+    eq(S.rivals.length, 0, "no rivals at the start"); eq(S.rivalQueue.length, 2, "two waiting");
+    simulateDays(700); eq(S.rivals.length, 0, "still none after 23 months");
+    simulateDays(60); eq(S.rivals.length, 1, "first after two years");
+    assert(S.news.items.some(n => /has started up/.test(n.text)), "news");
+    simulateDays(190); eq(S.rivals.length, 2, "second six months later"); eq(S.rivalQueue.length, 0, "queue empty");
+    simulateDays(365); assert(S.rivals.some(r => r.ai.routes.length > 0), "they build routes");
+  }],
+  ["build", "Depots go on or next to a road or track", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "11" });
+    S.company.cash = 900000; const m = S.map;
+    let spot = null;
+    for (const r of R.roads.tiles()) { for (const [dx, dy] of DIR4) { const x = r.x + dx, y = r.y + dy; if (inB(x, y) && !m.water[key(x, y)] && !m.occupied[key(x, y)] && !R.roads.hasRoad(x, y) && !R.rail.hasRoad(x, y) && !councilRefuses(x, y)) { spot = { x, y, from: r }; break; } } if (spot) break; }
+    assert(spot, "land beside a road"); const cash = S.company.cash;
+    const d = placeDepot(spot.x, spot.y); assert(d.ok, d.reason); assert(R.roads.hasRoad(spot.x, spot.y), "a road piece under the depot");
+    assert(R.roads.connected(spot, spot.from), "joined to the road"); assert(S.company.cash < cash - d.cost, "the road piece was paid for");
+    const bus = V.availableModels(1950, "bus")[0]; assert(buyVehicle(bus.id, d.depot).ok, "bus bought there");
+    // nowhere near a road: refused
+    let far = null; for (let y = 2; y < m.h - 2 && !far; y++) for (let x = 2; x < m.w - 2 && !far; x++) { let ok = !m.water[key(x, y)] && !m.occupied[key(x, y)]; for (const [dx, dy] of DIR4) if (R.roads.hasRoad(x + dx, y + dy) || R.rail.hasRoad(x + dx, y + dy)) ok = false; if (ok && !R.roads.hasRoad(x, y)) far = { x, y }; }
+    assert(!placeDepot(far.x, far.y).ok, "not out in a field");
+    // train depot beside track
+    const a = far; let t0 = null; for (let y = 3; y < m.h - 3 && !t0; y++) for (let x = 3; x < m.w - 6 && !t0; x++) { let ok = true; for (let dy = -1; dy <= 1; dy++) for (let dx = 0; dx <= 4; dx++) if (m.water[key(x + dx, y + dy)] || m.occupied[key(x + dx, y + dy)] || R.roads.hasRoad(x + dx, y + dy)) ok = false; if (ok) t0 = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(t0.x + k, t0.y);
+    const td = placeDepot(t0.x + 1, t0.y + 1, "rail"); assert(td.ok, td.reason); assert(R.rail.connected({ x: t0.x + 1, y: t0.y + 1 }, { x: t0.x + 3, y: t0.y }), "train depot joined to the track");
+  }],
+  ["build", "Bulldoze removes houses and trees", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "11" });
+    S.company.cash = 900000; const m = S.map, t = m.towns[0], b = t.buildings[0], pop = t.population, rate = townRating(t), n = t.buildings.length;
+    const r = bulldoze(b.x, b.y); assert(r.ok && r.removed === "building", r.reason);
+    eq(t.buildings.length, n - 1, "house gone"); assert(t.population < pop, "fewer people"); assert(townRating(t) < rate, "town not pleased");
+    assert(!R.bld.has(key(b.x, b.y)) && !m.occupied[key(b.x, b.y)], "tile free"); assert(buildRoadTile(b.x, b.y).ok, "can build there now");
+    let tree = -1; for (let k = 0; k < m.w * m.h; k++) if (m.forest[k] && !m.occupied[k] && !m.water[k]) { tree = k; break; }
+    assert(tree >= 0, "a tree"); const tx = tree % m.w, ty = (tree / m.w) | 0;
+    const r2 = bulldoze(tx, ty); assert(r2.ok && r2.removed === "tree", r2.reason); assert(!m.forest[tree], "tree gone");
+    assert(!bulldoze(tx, ty).ok, "nothing left to remove");
+    const ind = m.industries[0]; assert(!bulldoze(ind.x, ind.y).ok, "industries stay");
+  }],
+  ["water", "Docks: tap the shore or the water; ships on other water get a warning", () => {
+    let d = null;
+    for (const seed of ["11", "12", "13", "14", "15", "16"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed, water: 0.85 }); d = buildDemoShip(); if (d.ok) break; }
+    assert(d.ok, "a tanker line"); const m = S.map; S.company.cash = 900000;
+    // a free water tile with free shore beside it, on the same water as the tanker
+    let w = null; for (const t of R.sea.tiles()) { if (m.occupied[key(t.x, t.y)] || S.stations.some(s => s.water && sameT(s.water, t)) || !R.sea.connected(t, d.dock.water)) continue; if (DIR4.some(([dx, dy]) => freeShore(t.x + dx, t.y + dy))) { w = t; break; } }
+    assert(w, "shore");
+    const r = placeDock(w.x, w.y); assert(r.ok, r.reason); assert(sameT(r.station.water, w), "the tapped water is the dock's berth"); assert(!m.water[key(r.station.x, r.station.y)], "dock on land");
+    eq(orderWarnings(d.vh).filter(x => /other water/.test(x)).length, 0, "no warning on the same water");
+    simulateDays(200); assert(d.vh.trips >= 2, "tanker docks at both ends: " + d.vh.trips);
+    // a dock on a different lake
+    const other = S.stations.find(s => s.kind === "dock" && s.water && !R.sea.connected(s.water, d.dock.water));
+    let lake = null; if (!other) for (const t of R.sea.tiles()) { if (!R.sea.connected(t, d.dock.water) && !m.occupied[key(t.x, t.y)] && DIR4.some(([dx, dy]) => freeShore(t.x + dx, t.y + dy))) { lake = placeDock(t.x, t.y); if (lake.ok) break; } }
+    const far = other || (lake && lake.ok && lake.station);
+    if (far) { addStopTo(d.vh, far.id); assert(orderWarnings(d.vh).some(x => /other water/.test(x)), "warned about other water"); }
   }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });

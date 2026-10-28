@@ -39,13 +39,13 @@ const TOOLS = [
   ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to paint a road."],
   ["busStop", "Bus stop", () => "Bus stop: " + money(cost(STATION_COST)) + ". Tap a road tile near houses. Its catchment is highlighted."],
   ["truckStop", "Truck stop", () => "Truck stop: " + money(cost(STATION_COST)) + ". Tap a road tile within 3 tiles of a mine, farm, forest or factory."],
-  ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile. Vehicles are bought and serviced here."],
+  ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile or the land beside one. Vehicles are bought and serviced here."],
   ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
-  ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile. Trains are built and serviced here."],
+  ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile or the land beside one. Trains are built and serviced here."],
   ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Each tap changes it: block one way, turned round, two-way, path signal one way, turned round, off."],
   ["electrify", "Electrify", () => "Electrify: " + money(cost(ELEC_COST)) + " per tile. Drag over track. Electric locomotives only run on electrified track."],
-  ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap a shore tile next to open water. Ships load and unload here."],
+  ["dock", "Dock", () => "Dock: " + money(cost(2400)) + ". Tap the shore or the water beside it. Ships load and unload here."],
   ["shipyard", "Shipyard", () => "Shipyard: " + money(cost(3500)) + ". Tap open water next to the shore. Ships are built here."],
   ["airport", "Airport", () => "Small airport: " + money(cost(AIRPORTS.small.cost)) + ", 2 x 2 tiles. Tap the top corner of flat, clear land. Propeller planes only."],
   ["airportL", "City airport", () => "City airport: " + money(cost(AIRPORTS.large.cost)) + ", 3 x 3 tiles, from " + AIRPORTS.large.year + ". Jets need one at both ends."],
@@ -53,7 +53,7 @@ const TOOLS = [
   ["bridge", "Bridge", "Tap the last road or track tile before water or a hill. A bridge or tunnel is built to the far side at the same height."],
   ["raise", "Raise land", () => "Raise land: about " + money(cost(250)) + " per tile. Neighbours follow to keep slopes gentle."],
   ["lower", "Lower land", () => "Lower land: about " + money(cost(250)) + " per tile."],
-  ["bulldoze", "Bulldoze", () => "Bulldoze: " + money(cost(BULLDOZE)) + ". Removes roads, stops and depots."],
+  ["bulldoze", "Bulldoze", () => "Bulldoze: " + money(cost(BULLDOZE)) + ". Removes roads, track, stops, depots, houses and trees. Houses cost more and upset the town."],
 ];
 function buildToolbar() {
   const tb = $("#tools"); tb.innerHTML = "";

@@ -152,7 +152,7 @@ export function rollMonthlyEvents(
   }
 
   // 4. A new industry opens now and then (after the first year)
-  if (date.year > ctx.startYear && ctx.towns.length && rng() < 0.015) {
+  if (date.year > ctx.startYear && ctx.towns.length && rng() < 0.06) {
     const kinds = ["coalMine", "forest", "farm", "factory", "sawmill", "powerStation"];
     const kind = kinds[Math.floor(rng() * kinds.length)];
     const town = ctx.towns[Math.floor(rng() * ctx.towns.length)];

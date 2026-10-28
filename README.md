@@ -6,8 +6,8 @@ Play it: open `dist/transport-co.html` in a browser, or the published Claude art
 
 ## What's in the game
 
-- Random maps from a seed in four climates, each with its own industries and cargo (22 cargo types). Water, rivers, size up to 160 x 160, and English, Swedish, German, French or silly town names
-- Roads, one-way roads, bus and truck stops with several bays, depots, railway track, level crossings, signals, electrification, multi-tile stations, docks, shipyards, small and city airports, bridges, tunnels, raising and lowering land, undo
+- Random maps from a seed in four climates, each with its own industries and cargo (22 cargo types). Water, rivers, size up to 320 x 320, and English, Swedish, German, French or silly town names
+- Roads, one-way roads, bus and truck stops with several bays, depots, railway track, level crossings, signals, electrification, multi-tile stations, docks, shipyards, small and city airports, bridges, tunnels, raising and lowering land, demolishing houses and trees, undo
 - Buses, trucks for every cargo, locomotives with wagons for every cargo, ships (ferries, freighters, bulk carriers, oil tankers) and aircraft (propeller, mail, jets)
 - Trains several tiles long that reserve track; block signals and path signals; passing loops; stuck trains are reported
 - Industry chains per climate; snow towns need food and desert towns need water to grow; oil rigs at sea

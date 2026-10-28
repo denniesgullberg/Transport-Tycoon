@@ -23,7 +23,7 @@ ${game("body.html")}
 <script>
 (function(){
 ${parts}
-window.__TT_DEBUG = { get S(){return S}, get R(){return R}, runTests, buildDemoRoute, demoLine, buildDemoShip, buildDemoAir, simulateDays, startGame, buyVehicle, TESTS, centerOn, view, ui };
+window.__TT_DEBUG = { get S(){return S}, get R(){return R}, runTests, buildDemoRoute, demoLine, buildDemoShip, buildDemoAir, simulateDays, startGame, buyVehicle, TESTS, centerOn, view, ui, run: (src) => eval(src) };
 boot();
 })();
 </script>
