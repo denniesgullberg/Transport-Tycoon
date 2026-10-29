@@ -373,13 +373,14 @@ function label(px, py, text, size, col) {
   ctx.strokeText(text, px, py); ctx.fillStyle = col || "#fff"; ctx.fillText(text, px, py);
 }
 const PILLW = new Map();
-function pill(px, py, text, size, strong) {
+function pill(px, py, text, size, strong, dot) {
   ctx.font = (strong ? "700 " : "600 ") + size + "px Inter, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const k = size + "|" + (strong ? 1 : 0) + text; let w = PILLW.get(k); if (w == null) { w = ctx.measureText(text).width; PILLW.set(k, w); }
-  const W = w + size * 1.3, H = size * 1.75, x = px - W / 2, y = py - H / 2, r = H / 2;
+  const dw = dot ? size * 0.9 : 0, W = w + size * 1.3 + dw, H = size * 1.75, x = px - W / 2, y = py - H / 2, r = H / 2;
   ctx.fillStyle = strong ? "rgba(17,24,33,.78)" : "rgba(17,24,33,.6)";
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + W - r, y); ctx.arc(x + W - r, y + r, r, -Math.PI / 2, Math.PI / 2); ctx.lineTo(x + r, y + H); ctx.arc(x + r, y + r, r, Math.PI / 2, Math.PI * 1.5); ctx.fill();
-  ctx.fillStyle = "#fff"; ctx.fillText(text, px, py + 0.5); ctx.textBaseline = "alphabetic";
+  if (dot) { ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + r + 0.5, py, size * 0.32, 0, 7); ctx.fill(); }
+  ctx.fillStyle = "#fff"; ctx.fillText(text, px + dw / 2, py + 0.5); ctx.textBaseline = "alphabetic";
 }
 
 // ------------------------------------------------------------ roads and track
@@ -482,6 +483,7 @@ function drawStation(px, py, s, x, y) {
     box(px - d.x * 0.12, py - d.y * 0.12, 0.6, 12, "#d3c09a", "#b49f78", "#8a7552");
     diamond(px - d.x * 0.12, py - d.y * 0.12 - 12, col, 0.3);
     (R.docksLate || (R.docksLate = [])).push([px, py, s]);
+    if (prefs.labels && view.z >= 0.7) R.labelsLate.push([px, py - 40, s.name, 9.5, false, col]);
     return;
   }
   if (s.kind === "airport") {
@@ -491,6 +493,7 @@ function drawStation(px, py, s, x, y) {
     if (cx === 0 && cy === 0) { box(px, py, 0.7, 10, "#ece8dc", "#cfc9b4", "#aaa38c"); ctx.fillStyle = "#3a6fa8"; ctx.fillRect(px - 8, py - 13, 16, 3); }
     if (cx === n - 1 && cy === 0) { ctx.fillStyle = "#666"; ctx.fillRect(px - 1.5, py - 26, 3, 24); ctx.fillStyle = "#bfe3ff"; ctx.fillRect(px - 5, py - 31, 10, 6); ctx.fillStyle = col; ctx.fillRect(px - 5, py - 33, 10, 2); R.lights.push([px, py - 28, 9, 0.8, "#bfe3ff"]); }
     if (cx === 0 && cy === n - 1) box(px, py, 0.8, 9, "#bec2c8", "#9aa0a8", "#7a8088");
+    if (cx === n - 1 && cy === n - 1 && prefs.labels && view.z >= 0.7) R.labelsLate.push([px, py - (n - 1) * TH / 2 - 44, s.name, 9.5, false, col]);
     return;
   }
   if (s.kind === "trainStation") {
@@ -653,7 +656,16 @@ function draw() {
   const vs = [];
   for (const v of S.vehicles) {
     if (isTrain(v)) { if (!vis(v.tile.x, v.tile.y) && !(v.trail || []).some(t => vis(t.x, t.y))) continue; for (const u of trainUnits(v)) if (!inTunnel(u.gx, u.gy)) vs.push({ v, pos: u, unit: u }); }
-    else if (!inTunnel(v.tile.x, v.tile.y) && (isAir(v) || vis(v.tile.x, v.tile.y))) vs.push({ v, pos: vehiclePos(v) });
+    else if (!inTunnel(v.tile.x, v.tile.y) && (isAir(v) || vis(v.tile.x, v.tile.y))) {
+      const pos = vehiclePos(v);
+      // ease the drawn position toward the real one, so a stop, a queue or a lane change never jumps
+      if (!isAir(v)) {
+        const k = 1 - Math.exp(-dt * 14);
+        if (v._sx == null || Math.hypot(v._sx - pos.x, v._sy - pos.y) > 30) { v._sx = pos.x; v._sy = pos.y; } else { v._sx += (pos.x - v._sx) * k; v._sy += (pos.y - v._sy) * k; }
+        pos.x = v._sx; pos.y = v._sy;
+      }
+      vs.push({ v, pos });
+    }
   }
   vs.sort((a, b) => (a.pos.gx + a.pos.gy) - (b.pos.gx + b.pos.gy));
   for (const it of vs) it.unit ? drawUnit(it.v, it.unit, dk) : drawVehicle(it.v, it.pos, dk);
@@ -662,7 +674,7 @@ function draw() {
   drawNight(dk, W, H);
   drawLights(dk);
   // 6. labels and income pop-ups
-  for (const l of R.labelsLate) pill(l[0], l[1], l[2], l[3], l[4]);
+  for (const l of R.labelsLate) pill(l[0], l[1], l[2], l[3], l[4], l[5]);
   if (prefs.labels && view.z >= 0.6) for (const t of m.towns) {
     if (t.x < x0 || t.x > x1 || t.y < y0 || t.y > y1) continue;
     const p = iso(t.x, t.y, tileH(t.x, t.y));
@@ -681,8 +693,35 @@ function draw() {
 }
 
 // ------------------------------------------------------------ vehicles
+// Road vehicles and ships round their corners and keep to their own side of the road.
+const LANE = 0.13;
+function curvePos(v) {
+  const dx = v.to.x - v.from.x, dy = v.to.y - v.from.y, p = v.p;
+  let corner = null, din = null, dout = null, u = 0;
+  if (p >= 0.5) {
+    const net = netOf(v), nx = net.peek ? net.peek(v.id, 1) : null;
+    if (nx) { const ox = nx.x - v.to.x, oy = nx.y - v.to.y; if ((ox !== dx || oy !== dy) && Math.abs(ox) + Math.abs(oy) === 1 && !(ox === -dx && oy === -dy)) { corner = v.to; din = [dx, dy]; dout = [ox, oy]; u = p - 0.5; } }
+  } else if (v.flow && v.pdir && (v.pdir.dx !== dx || v.pdir.dy !== dy) && !(v.pdir.dx === -dx && v.pdir.dy === -dy)) { corner = v.from; din = [v.pdir.dx, v.pdir.dy]; dout = [dx, dy]; u = p + 0.5; }
+  if (!corner) return { gx: v.from.x + dx * p, gy: v.from.y + dy * p, tx: dx, ty: dy };
+  // quadratic curve from the middle of the edge we came in by, round the corner, to the edge we leave by
+  const ax = corner.x - din[0] * 0.5, ay = corner.y - din[1] * 0.5, bx = corner.x + dout[0] * 0.5, by = corner.y + dout[1] * 0.5, w = 1 - u;
+  return { gx: w * w * ax + 2 * u * w * corner.x + u * u * bx, gy: w * w * ay + 2 * u * w * corner.y + u * u * by, tx: w * din[0] + u * dout[0], ty: w * din[1] + u * dout[1] };
+}
 function vehiclePos(v) {
   let gx = v.tile.x, gy = v.tile.y;
+  if (!isTrain(v) && !isAir(v)) {
+    let tx = v.dir ? v.dir.dx : 1, ty = v.dir ? v.dir.dy : 0;
+    let side = 1;
+    if (v.state === "moving") {
+      const c = curvePos(v); gx = c.gx; gy = c.gy; tx = c.tx; ty = c.ty;
+      if (v.pdir && v.pdir.dx === -tx && v.pdir.dy === -ty && v.p < 0.5) side = v.p * 4 - 1;   // turning round: swing across to the other lane
+    }
+    const L = Math.hypot(tx, ty) || 1; gx += ty / L * LANE * side; gy -= tx / L * LANE * side;
+    const h0 = tileH(Math.round(v.from.x), Math.round(v.from.y)), h1 = tileH(Math.round(v.to.x), Math.round(v.to.y));
+    const h = v.state === "moving" ? h0 + (h1 - h0) * v.p : tileH(v.tile.x, v.tile.y);
+    const pp = iso(gx, gy, h);
+    return { gx, gy, x: pp.x, y: pp.y };
+  }
   if (v.state === "moving") { gx = v.from.x + (v.to.x - v.from.x) * v.p; gy = v.from.y + (v.to.y - v.from.y) * v.p; }
   const h0 = tileH(Math.round(v.from.x), Math.round(v.from.y)), h1 = tileH(Math.round(v.to.x), Math.round(v.to.y));
   const h = v.state === "moving" ? h0 + (h1 - h0) * v.p : tileH(v.tile.x, v.tile.y);
@@ -736,6 +775,16 @@ function trainUnits(v) {
   const head = v.state === "moving" ? { x: v.tile.x + (v.to.x - v.tile.x) * v.p, y: v.tile.y + (v.to.y - v.tile.y) * v.p } : { x: v.tile.x, y: v.tile.y };
   pts.push(head);
   for (const t of (v.trail || [v.tile])) if (!(pts.length === 1 && v.state !== "moving" && t.x === head.x && t.y === head.y)) pts.push(t);
+  // cut the corners a little so wagons follow a curve instead of a sharp bend
+  if (pts.length > 2) {
+    const sm = [pts[0]];
+    for (let k = 1; k < pts.length - 1; k++) {
+      const a = pts[k - 1], b = pts[k], c = pts[k + 1];
+      if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) === 0) { sm.push(b); continue; }
+      sm.push({ x: b.x + (a.x - b.x) * 0.3, y: b.y + (a.y - b.y) * 0.3 }, { x: b.x + (c.x - b.x) * 0.3, y: b.y + (c.y - b.y) * 0.3 });
+    }
+    sm.push(pts[pts.length - 1]); pts.length = 0; pts.push(...sm);
+  }
   const n = Math.min(m.parts.n, 12) + 1, out = [];
   let seg = 0, along = 0;   // walk back along the polyline
   for (let u = 0; u < n; u++) {

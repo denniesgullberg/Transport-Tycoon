@@ -55,6 +55,8 @@ export class RoadNetwork {
   private heightAt?: (x: number, y: number) => number;
   /** How many vehicles fit on one road tile before the next one has to wait. */
   laneCapacity: number;
+  /** Extra cost of a bend when finding a route (0 lets a route zigzag freely, as ships on open water do). */
+  turnCost = 0.35;
   /** Optional rule for one-way roads: return false to forbid stepping from a to b. */
   stepOk?: (a: Pt, b: Pt) => boolean;
 
@@ -132,39 +134,54 @@ export class RoadNetwork {
     return d > 0 ? 1 + d * 0.6 : 1;     // prefer flatter routes
   }
 
-  /** Shortest route including both ends, or null. */
-  findPath(a: Pt, b: Pt, maxNodes = 40000): Pt[] | null {
+  /**
+   * Shortest route including both ends, or null. Each turn costs a little extra, so of two
+   * routes the same length the one with fewer bends wins and vehicles do not zigzag.
+   */
+  findPath(a: Pt, b: Pt, maxNodes = 60000): Pt[] | null {
     const s = num(a.x, a.y), goal = num(b.x, b.y);
     if (!this.roads.has(s) || !this.roads.has(goal)) return null;
     if (!this.connected(a, b)) return null;
-    const g = new Map<number, number>([[s, 0]]);
+    if (s === goal) return [a];
+    const TURN = this.turnCost;
+    // a search state is a tile plus the direction we arrived in (4 = start)
+    const key = (n: number, d: number) => n * 5 + d;
+    const g = new Map<number, number>([[key(s, 4), 0]]);
     const prev = new Map<number, number>();
     const closed = new Set<number>();
     const heap = new MinHeap();
-    heap.push(s, Math.abs(a.x - b.x) + Math.abs(a.y - b.y));
-
-    let n = 0;
+    heap.push(key(s, 4), Math.abs(a.x - b.x) + Math.abs(a.y - b.y));
+    let n = 0, end = -1;
     while (heap.size() && n++ < maxNodes) {
       const cur = heap.pop()!;
       if (closed.has(cur)) continue;
       closed.add(cur);
-      if (cur === goal) break;
-      const p = pt(cur);
-      for (const [dx, dy] of DIRS) {
+      const tile = Math.floor(cur / 5), din = cur % 5;
+      if (tile === goal) { end = cur; break; }
+      const p = pt(tile);
+      for (let d = 0; d < 4; d++) {
+        const [dx, dy] = DIRS[d];
         const nn = num(p.x + dx, p.y + dy);
         if (!this.roads.has(nn)) continue;
         if (this.stepOk && !this.stepOk(p, pt(nn))) continue;
-        const ng = g.get(cur)! + this.stepCost(cur, nn);
-        if (ng < (g.get(nn) ?? Infinity)) {
-          g.set(nn, ng); prev.set(nn, cur);
-          heap.push(nn, ng + Math.abs(p.x + dx - b.x) + Math.abs(p.y + dy - b.y));
+        const nk = key(nn, d);
+        const ng = g.get(cur)! + this.stepCost(tile, nn) + (din !== 4 && din !== d ? TURN : 0);
+        if (ng < (g.get(nk) ?? Infinity)) {
+          g.set(nk, ng); prev.set(nk, cur);
+          heap.push(nk, ng + Math.abs(p.x + dx - b.x) + Math.abs(p.y + dy - b.y));
         }
       }
     }
-    if (s !== goal && !prev.has(goal)) return null;
-    const out: number[] = [goal];
-    for (let c = goal; c !== s; c = prev.get(c)!) out.push(prev.get(c)!);
+    if (end < 0) return null;
+    const out: number[] = [];
+    for (let c = end; c !== undefined; c = prev.get(c)!) { out.push(Math.floor(c / 5)); if (c === key(s, 4)) break; }
     return out.reverse().map(pt);
+  }
+
+  /** The tile k steps further along this vehicle's planned route, or null. */
+  peek(vehicleId: string, k = 1): Pt | null {
+    const c = this.cache.get(vehicleId); if (!c || c.version !== this.version) return null;
+    const n = c.path[c.i + k]; return n === undefined ? null : pt(n);
   }
 
   // ----------------------------------------------------------------- driving

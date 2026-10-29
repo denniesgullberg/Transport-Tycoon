@@ -41,11 +41,30 @@ function orderWarnings(vh) {
   return out;
 }
 
+// Stops in the towns this vehicle already serves that it could also call at.
+function townStopsMissing(vh) {
+  const have = new Set(vh.orders.orders.filter(o => o.kind === "stop").map(o => o.stationId)), towns = new Set();
+  for (const id of have) { const s = stationById(id); if (s) covered(s).towns.forEach(t => towns.add(t)); }
+  if (!towns.size) return [];
+  return S.stations.filter(s => !have.has(s.id) && reachable(vh, s) && (producesAt(s, vh.cargo) || acceptsAt(s, vh.cargo)) && [...covered(s).towns].some(t => towns.has(t)));
+}
+// Put each missing stop right after the stop in the same town that it is closest to.
+function addTownStops(vh) {
+  const add = townStopsMissing(vh);
+  for (const s of add) {
+    const list = vh.orders.orders; let at = list.length, bd = 1e9;
+    list.forEach((o, i) => { if (o.kind !== "stop") return; const t = stationById(o.stationId); if (!t) return; const d = Math.abs(t.x - s.x) + Math.abs(t.y - s.y); if (d < bd && [...covered(t).towns].some(x => covered(s).towns.has(x))) { bd = d; at = i + 1; } });
+    OR.addStop(vh.orders, s.id, "auto"); const o = list.pop(); list.splice(at, 0, o); if (vh.orders.current >= at && list.length > 1) vh.orders.current++;
+    markServed(s, vh.cargo);
+  }
+  return add.length;
+}
 function ordersEditor(vh, box, onChange) {
   const m = modelOf(vh), mine = vh.owner === "player";
   function render() {
-    const sts = S.stations.filter(s => (s.owner === vh.owner || s.owner === "public") && (!mine || (s.kind === stationKindFor(m) && canUseStation(m, s))));
-    const opt = (sel) => sts.map(s => "<option value='" + s.id + "'" + (s.id === sel ? " selected" : "") + ">" + s.name + "</option>").join("");
+    // only stops this vehicle can drive, sail or fly to from where it is now
+    const sts = S.stations.filter(s => mine ? reachable(vh, s) : (s.owner === vh.owner || s.owner === "public"));
+    const opt = (sel) => { const cur = sel && !sts.some(s => s.id === sel) ? stationById(sel) : null; return (cur ? "<option value='" + cur.id + "' selected>" + cur.name + " (not reachable)</option>" : "") + sts.map(s => "<option value='" + s.id + "'" + (s.id === sel ? " selected" : "") + ">" + s.name + "</option>").join(""); };
     let h = "<h4>Orders</h4>";
     const list = vh.orders.orders;
     if (!list.length) h += "<p class='dim'>No orders yet. Add at least two stops.</p>";
@@ -61,7 +80,9 @@ function ordersEditor(vh, box, onChange) {
           "<div class='row'><button data-a='up' data-i='" + i + "'" + (i === 0 ? " disabled" : "") + ">Up</button><button data-a='down' data-i='" + i + "'" + (i === list.length - 1 ? " disabled" : "") + ">Down</button><button data-a='go' data-i='" + i + "'>Go here now</button><button data-a='del' data-i='" + i + "'>Remove</button></div>" : "") + "</div>";
     });
     if (mine) {
-      h += sts.length ? "<div class='row'><select id='add-" + vh.id + "'>" + opt("") + "</select><button class='gb sm' data-a='add'>Add stop</button></div>" : "<p class='warn'>Build a " + ({ busStop: "bus stop", truckStop: "truck stop", trainStation: "train station", dock: "dock", airport: "airport" })[stationKindFor(m)] + " first.</p>";
+      const kindName = ({ busStop: "bus stop", truckStop: "truck stop", trainStation: "train station", dock: "dock", airport: "airport" })[stationKindFor(m)];
+      h += sts.length ? "<div class='row'><select id='add-" + vh.id + "'>" + opt("") + "</select><button class='gb sm' data-a='add'>Add stop</button></div>" : "<p class='warn'>No " + kindName + " can be reached from here. Build one on the same " + (isTrain(vh) ? "track" : isShip(vh) ? "water" : "road") + ".</p>";
+      if (townStopsMissing(vh).length) h += "<button class='gb sm' data-a='town'>Add the other " + kindName + "s in these towns (" + townStopsMissing(vh).length + ")</button>";
       const sim = similarVehicles(vh).length;
       if (sim) h += "<button class='gb sm' data-a='copy'>Copy these orders to " + sim + " similar vehicle" + (sim > 1 ? "s" : "") + "</button>";
     }
@@ -82,6 +103,7 @@ function ordersEditor(vh, box, onChange) {
     if (a === "down") moveOrder(vh, i, 1);
     if (a === "go") { vh.orders.current = i; vh.orders.phase = "travelling"; vh.orders.dwellDays = 0; if (vh.state === "docked") vh.state = "idle"; }
     if (a === "add") { const sel = box.querySelector("#add-" + vh.id); if (sel && sel.value) addStopTo(vh, sel.value); }
+    if (a === "town") { const n = addTownStops(vh); toast("Added " + n + " stop" + (n === 1 ? "" : "s") + "."); }
     if (a === "copy") { const n = copyOrdersToSimilar(vh); toast("Copied to " + n + " vehicle" + (n === 1 ? "" : "s") + "."); }
     render(); onChange && onChange();
   };

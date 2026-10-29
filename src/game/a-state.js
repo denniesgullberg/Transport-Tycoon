@@ -195,6 +195,32 @@ function bestPair(cargo, nearTile, stKind, net) {
   }
   return best;
 }
+// Stops this vehicle could use: its kind, its owner's or public, and reachable from where it is.
+function reachable(vh, s) {
+  const m = modelOf(vh); if (!m) return false;
+  if (s.kind !== stationKindFor(m) || !canUseStation(m, s)) return false;
+  if (s.owner !== vh.owner && s.owner !== "public") return false;
+  if (isAir(vh)) return true;
+  const net = netOf(vh), from = isShip(vh) ? vh.tile : vh.tile;
+  if (isTrain(vh)) return stationTiles(s).some(t => R.rail.hasRoad(t.x, t.y) && R.rail.connected(t, from));
+  return net.connected(stationPoint(s), from);
+}
+// With two stops picked, also visit every other stop of the same kind in those towns that has
+// this cargo or takes it: first round the start town, then round the end town.
+function autoRoute(pair, cargo, net, m) {
+  if (!pair) return pair;
+  const a = stationById(pair[0]), b = stationById(pair[1]); if (!a || !b) return pair;
+  const pt = (s) => stationPoint(s), d = (s, t) => Math.abs(s.x - t.x) + Math.abs(s.y - t.y);
+  const townsOf = (s) => covered(s).towns;
+  const ok = (s) => s !== a && s !== b && (s.owner === "player" || s.owner === "public") && s.kind === a.kind && (!m || canUseStation(m, s)) && (producesAt(s, cargo) || acceptsAt(s, cargo)) && net.connected(pt(s), pt(a));
+  const ta = townsOf(a), tb = townsOf(b);
+  if (!ta.size && !tb.size) return pair;
+  const extraA = [], extraB = [];
+  for (const s of S.stations) { if (!ok(s)) continue; const c = townsOf(s); if ([...c].some(t => ta.has(t))) extraA.push(s); else if ([...c].some(t => tb.has(t))) extraB.push(s); }
+  if (!extraA.length && !extraB.length) return pair;
+  extraA.sort((p, q) => d(q, b) - d(p, b)); extraB.sort((p, q) => d(p, a) - d(q, a));
+  return [a.id, ...extraA.map(s => s.id), ...extraB.map(s => s.id), b.id];
+}
 function buyVehicle(modelId, depot) {
   const m = V.getModel(modelId);
   if (!m || !m.supported || !["bus", "truck", "train", "ship", "aircraft"].includes(m.type)) return { ok: false, msg: "This vehicle type is not playable yet." };
@@ -206,7 +232,7 @@ function buyVehicle(modelId, depot) {
   const price = vehiclePrice(m);
   if (S.company.cash < price) return { ok: false, msg: "Not enough money." };
   const near = dk === "ship" ? { x: depot.x, y: depot.y } : depot;
-  const pair = bestPair(m.cargo, near, stationKindFor(m), netFor(dk), m);
+  const pair = autoRoute(bestPair(m.cargo, near, stationKindFor(m), netFor(dk), m), m.cargo, netFor(dk), m);
   spend("newVehicles", price);
   const vh = makeVehicle("player", modelId, depot, pair || []);
   if (dk === "air") { vh.core.breakdownsEnabled = S.settings.breakdowns > 0; vh.orders.autoService = false; vh.at = depot.airport; const ap = stationById(depot.airport); if (ap) { const c = airportCentre(ap); vh.pos = { x: c.x, y: c.y }; } }
@@ -272,6 +298,8 @@ function tryStep(vh) {
   if (net === R.sea ? !net.canEnter(vh.id, next) : !roadCanEnter(vh, next, target)) { vh.state = "idle"; return; }
   if (R.res.has(next.y * S.map.w + next.x)) { vh.state = "idle"; return; }   // barriers down: a train is coming
   net.moveVehicle(vh.id, vh.tile, next);
+  vh.flow = vh.state === "idle" && vh.arrivedMoving;   // carried straight on from the last tile without stopping
+  vh.pdir = vh.dir;
   vh.from = { x: vh.tile.x, y: vh.tile.y }; vh.to = next; vh.p = 0; vh.state = "moving"; vh.wait = 0;
   vh.dir = { dx: next.x - vh.tile.x, dy: next.y - vh.tile.y };
 }
@@ -352,7 +380,7 @@ function moveVehicles(dtDays) {
       while (vh.p >= 1 && vh.state === "moving" && guard-- > 0) {
         vh.p -= 1; vh.tile = { x: vh.to.x, y: vh.to.y }; vh.state = "idle";
         if (isTrain(vh)) trainArrive(vh);
-        const keep = vh.p; tryStep(vh); if (vh.state === "moving") vh.p = keep; else vh.p = 0;
+        const keep = vh.p; vh.arrivedMoving = true; tryStep(vh); vh.arrivedMoving = false; if (vh.state === "moving") vh.p = keep; else vh.p = 0;
       }
     } else if (vh.state === "idle") {
       // retry a few times a day of game time, so it behaves the same at any frame rate
@@ -475,11 +503,23 @@ function removeIndustry(id) {
 }
 
 // -------------------------------------------------------------------- building
+// Compass direction from the town centre, as seen on screen (north is up).
+function compassFrom(t, x, y) {
+  const ex = (x - t.x) - (y - t.y), sy = (x - t.x) + (y - t.y);   // screen right, screen down
+  if (Math.hypot(ex, sy) < 4) return "Central";
+  const a = Math.atan2(-sy, ex), k = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
+  return ["East", "North East", "North", "North West", "West", "South West", "South", "South East"][k];
+}
+// Station names never repeat. A second station of the same kind in a town is named by its
+// direction from the centre, e.g. "Oakwood North Dock".
+const STATION_SUFFIX = { busStop: "", truckStop: " Freight", trainStation: " Station", dock: " Dock", airport: " Airport" };
 function nameStation(kind, x, y) {
-  const t = townOf(x, y);
-  const n = S.stations.filter(s => s.name.startsWith(t.name)).length;
-  const base = kind === "busStop" ? ["Central", "Market", "Road", "Church", "Park", "Hill"] : kind === "trainStation" ? ["Junction", "Central Station", "North Yard", "Sidings", "Halt", "Terminus"] : ["Goods Yard", "Depot Road", "Works", "Freight", "Wharf"];
-  return t.name + " " + base[n % base.length] + (n >= base.length ? " " + (Math.floor(n / base.length) + 1) : "");
+  const t = townOf(x, y), suf = STATION_SUFFIX[kind] != null ? STATION_SUFFIX[kind] : "", dir = compassFrom(t, x, y);
+  const taken = new Set(S.stations.map(s => s.name));
+  const cands = kind === "busStop" ? [t.name + " " + dir] : [t.name + suf, t.name + " " + dir + suf];
+  if (kind === "busStop") for (const b of ["Market", "Park", "Church", "Hill", "Bridge", "Square"]) cands.push(t.name + " " + dir + " " + b);
+  for (const c of cands) if (!taken.has(c)) return c;
+  for (let n = 2; ; n++) { const c = t.name + " " + dir + suf + " " + n; if (!taken.has(c)) return c; }
 }
 function canBuildRoadOn(x, y) {
   const m = S.map, i = key(x, y);

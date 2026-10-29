@@ -30,7 +30,7 @@ const ANYWHERE = { connected: () => true, hasRoad: () => true, removeVehicle() {
 
 // ---------------------------------------------------------------- water
 function rebuildSea() {
-  const m = S.map; R.sea = new roadnet.RoadNetwork(null, 4);
+  const m = S.map; R.sea = new roadnet.RoadNetwork(null, 4); R.sea.turnCost = 0;
   for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
     const i = y * m.w + x;
     if (m.water[i] && (!m.occupied[i] || R.depotAt.has(i) || (S.spans[i] && S.spans[i].kind === "bridge"))) R.sea.addRoad(x, y);
@@ -80,7 +80,7 @@ function placeDock(x, y, owner) {
   const no = owner === "player" ? councilRefuses(x, y) : ""; if (no) return { ok: false, reason: no };
   const c = cost(2400); if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
   if (m.forest[i]) m.forest[i] = 0;
-  const s = ST.newStation("s" + (++S.ids.s), townOf(x, y).name + " Dock", "dock", x, y);
+  const s = ST.newStation("s" + (++S.ids.s), nameStation("dock", x, y), "dock", x, y);
   s.owner = owner; s.water = w; s.tiles = [{ x, y }];
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);
   return { ok: true, station: s, cost: c, tile: { x, y } };
@@ -110,7 +110,7 @@ function placeAirport(x, y, type, owner) {
   }
   const no = owner === "player" ? councilRefuses(x, y) : ""; if (no) return { ok: false, reason: no };
   const c = cost(a.cost); if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money." }; spend("construction", c); }
-  const s = ST.newStation("s" + (++S.ids.s), townOf(x, y).name + " Airport", "airport", x, y);
+  const s = ST.newStation("s" + (++S.ids.s), nameStation("airport", x, y), "airport", x, y);
   s.owner = owner; s.size = type; s.tiles = [];
   for (let dy = 0; dy < a.size; dy++) for (let dx = 0; dx < a.size; dx++) { const t = { x: x + dx, y: y + dy }; s.tiles.push(t); R.stationAt.set(key(t.x, t.y), s); m.occupied[key(t.x, t.y)] = 1; m.forest[key(t.x, t.y)] = 0; }
   S.stations.push(s);

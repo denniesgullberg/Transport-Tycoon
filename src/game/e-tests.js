@@ -135,7 +135,7 @@ const TESTS = [
   ["game", "Playing: demo route builds, buses run and earn money", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 10, rivals: 0, startYear: 1950, seed: "2024" });
     const d = buildDemoRoute(); assert(d.ok, d.msg); assert(S.depots.length >= 1 && S.stations.length >= 2, "depot and stops placed");
-    const bus = V.availableModels(S.date.year, "bus")[0]; const r = buyVehicle(bus.id, S.depots[0]); assert(r.ok, r.msg); assert(r.pair && r.pair.length === 2, "orders auto-assigned");
+    const bus = V.availableModels(S.date.year, "bus")[0]; const r = buyVehicle(bus.id, S.depots[0]); assert(r.ok, r.msg); assert(r.pair && r.pair.length >= 2, "orders auto-assigned");
     const out = simulateDays(240); assert(out.pax > 0, "passengers delivered: " + JSON.stringify(out)); assert(S.vehicles[0].profit.thisYear + S.vehicles[0].profit.lastYear > 0, "bus earned income");
   }],
   ["game", "Game over, loading and a rival company over several years", () => {
@@ -770,6 +770,68 @@ const TESTS = [
     let lake = null; if (!other) for (const t of R.sea.tiles()) { if (!R.sea.connected(t, d.dock.water) && !m.occupied[key(t.x, t.y)] && DIR4.some(([dx, dy]) => freeShore(t.x + dx, t.y + dy))) { lake = placeDock(t.x, t.y); if (lake.ok) break; } }
     const far = other || (lake && lake.ok && lake.station);
     if (far) { addStopTo(d.vh, far.id); assert(orderWarnings(d.vh).some(x => /other water/.test(x)), "warned about other water"); }
+  }],
+  ["routes", "Routes prefer fewer bends, and vehicles round corners in their own lane", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 900000; const free = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)];
+    let a = null; for (let y = 3; y < 50 && !a; y++) for (let x = 3; x < 50 && !a; x++) { let ok = true; for (let dy = 0; dy < 6 && ok; dy++) for (let dx = 0; dx < 6 && ok; dx++) if (!free(x + dx, y + dy)) ok = false; if (ok) a = { x, y }; }
+    assert(a, "room for a road grid");
+    for (let dy = 0; dy < 6; dy++) for (let dx = 0; dx < 6; dx++) buildRoadTile(a.x + dx, a.y + dy);
+    const path = R.roads.findPath({ x: a.x, y: a.y }, { x: a.x + 5, y: a.y + 5 });
+    eq(path.length, 11, "shortest"); let turns = 0; for (let k = 2; k < path.length; k++) { const d1 = [path[k - 1].x - path[k - 2].x, path[k - 1].y - path[k - 2].y], d2 = [path[k].x - path[k - 1].x, path[k].y - path[k - 1].y]; if (d1[0] !== d2[0] || d1[1] !== d2[1]) turns++; }
+    eq(turns, 1, "one bend instead of a zigzag");
+    // a bus going round a corner
+    const bus = V.availableModels(1950, "bus")[0], v = makeVehicle("player", bus.id, { x: a.x, y: a.y }, []);
+    R.roads.nextTile(v.id, { x: a.x, y: a.y }, { x: a.x + 1, y: a.y + 3 });
+    const n1 = R.roads.nextTile(v.id, { x: a.x, y: a.y }, { x: a.x + 1, y: a.y + 3 }); R.roads.moveVehicle(v.id, v.tile, n1);
+    v.from = { x: a.x, y: a.y }; v.to = n1; v.state = "moving"; v.dir = { dx: n1.x - a.x, dy: n1.y - a.y }; v.p = 0.9;
+    const nx = R.roads.peek(v.id, 1); assert(nx, "knows the next tile");
+    const pos = vehiclePos(v), straight = { x: a.x + v.dir.dx * 0.9, y: a.y + v.dir.dy * 0.9 };
+    if (nx.x - n1.x !== v.dir.dx || nx.y - n1.y !== v.dir.dy) assert(Math.hypot(pos.gx - straight.x, pos.gy - straight.y) > 0.05, "cuts the corner");
+    // two buses passing on a straight road are on different sides
+    const w1 = makeVehicle("player", bus.id, { x: a.x, y: a.y + 5 }, []), w2 = makeVehicle("player", bus.id, { x: a.x + 1, y: a.y + 5 }, []);
+    w1.dir = { dx: 1, dy: 0 }; w2.dir = { dx: -1, dy: 0 }; w1.tile = w2.tile = { x: a.x + 1, y: a.y + 5 };
+    const p1 = vehiclePos(w1), p2 = vehiclePos(w2); assert(Math.abs(p1.gy - p2.gy) > 0.2, "separate lanes");
+  }],
+  ["routes", "Stop names: a second stop of the same kind in a town is named by direction", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
+    const t = S.map.towns[0]; eq(compassFrom(t, t.x - 6, t.y - 6), "North", "up the screen is north"); eq(compassFrom(t, t.x + 6, t.y - 6), "East", "right is east"); eq(compassFrom(t, t.x, t.y), "Central", "centre");
+    S.company.cash = 1e6; const names = [];
+    for (const r of R.roads.tiles().filter(r => townOf(r.x, r.y) === t).slice(0, 40)) { const st = placeStation(r.x, r.y, "busStop", "player"); if (st.ok && !st.joined) names.push(st.station.name); if (names.length >= 6) break; }
+    assert(names.length >= 4, "several stops"); eq(new Set(names).size, names.length, "all different: " + names.join(", "));
+    assert(names.some(n => /(North|South|East|West|Central)/.test(n)), "named by direction");
+    eq(nameStation("dock", t.x, t.y), t.name + " Dock", "first dock keeps the plain name");
+    S.stations.push({ id: "fake", name: t.name + " Dock", kind: "dock", x: t.x, y: t.y }); assert(nameStation("dock", t.x + 8, t.y - 8) === t.name + " East Dock", "second dock by direction"); S.stations.pop();
+  }],
+  ["routes", "New buses visit every stop in their towns; orders only list stops they can reach", () => {
+    let ok = false;
+    for (const seed of ["11", "12", "13", "14", "15"]) {
+      startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed });
+      const d = demoLine("road", "passengers", 2); if (!d.ok) continue;
+      const [sa, sb] = d.vh.orders.orders.map(o => stationById(o.stationId));
+      // two more stops in the first town, on its roads
+      const ta = [...covered(sa).towns][0]; let added = 0;
+      for (const r of R.roads.tiles()) { if (added >= 2) break; if (!R.roads.connected(r, sa) || R.stationAt.has(key(r.x, r.y)) || Math.abs(r.x - sa.x) + Math.abs(r.y - sa.y) < 3) continue; const sx = { x: r.x, y: r.y, kind: "busStop" }; const near = S.map.towns.find(z => z.id === ta); if (!near || Math.hypot(r.x - near.x, r.y - near.y) > near.radius) continue; const st = placeStation(r.x, r.y, "busStop", "player"); if (st.ok && !st.joined && covered(st.station).towns.has(ta)) added++; }
+      if (added < 2) continue;
+      const dep = S.depots.find(x => x.kind === "road"), bus = V.availableModels(S.date.year, "bus")[0];
+      const r = buyVehicle(bus.id, dep); assert(r.ok, r.msg);
+      assert(r.vh.orders.orders.length >= 4, "all stops in both towns: " + r.vh.orders.orders.length);
+      // the first bus gets the extra stops with the button
+      const before = d.vh.orders.orders.length, miss = townStopsMissing(d.vh).length; assert(miss >= 2, "missing stops found"); eq(addTownStops(d.vh), miss); eq(d.vh.orders.orders.length, before + miss);
+      // a stop on a road that is not connected is not offered
+      let lone = null; for (let y = 2; y < 94 && !lone; y++) for (let x = 2; x < 94 && !lone; x++) { if (!S.map.occupied[key(x, y)] && !S.map.water[key(x, y)] && !R.roads.hasRoad(x - 1, y) && !R.roads.hasRoad(x + 1, y) && !R.roads.hasRoad(x, y - 1) && !R.roads.hasRoad(x, y + 1)) lone = { x, y }; }
+      buildRoadTile(lone.x, lone.y); const ls = placeStation(lone.x, lone.y, "busStop", "player").station;
+      assert(!reachable(r.vh, ls) && reachable(r.vh, sa), "only connected stops are reachable");
+      fleetWin(); const box = document.createElement("div"); ordersEditor(r.vh, box, () => {}); assert(!box.innerHTML.includes(ls.name), "unreachable stop not listed"); closeAllWins();
+      ok = true; break;
+    }
+    assert(ok, "a town with room for more stops");
+  }],
+  ["routes", "Docks and airports show their names on the map", () => {
+    let d = null; for (const seed of ["11", "12", "13", "14", "15"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1960, seed, water: 0.85 }); d = buildDemoShip(); if (d.ok) break; }
+    assert(d.ok, "a dock"); prefs.labels = true; view.z = 1.4; centerOn(d.dock.x, d.dock.y); draw();
+    assert(R.labelsLate.some(l => l[2] === d.dock.name), "dock label");
+    const a = buildDemoAir(); if (a.ok) { const ap = S.stations.find(s => s.kind === "airport"); centerOn(ap.x, ap.y); draw(); assert(R.labelsLate.some(l => l[2] === ap.name), "airport label"); }
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
