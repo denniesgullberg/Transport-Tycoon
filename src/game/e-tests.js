@@ -771,6 +771,61 @@ const TESTS = [
     const far = other || (lake && lake.ok && lake.station);
     if (far) { addStopTo(d.vh, far.id); assert(orderWarnings(d.vh).some(x => /other water/.test(x)), "warned about other water"); }
   }],
+  ["look", "Tool dock and top bar use icons with short labels", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
+    const tools = [...document.querySelectorAll("#tools .tool")];
+    eq(tools.length, TOOLS.length + 1, "every tool plus undo"); assert(tools.every(b => b.querySelector("svg.ic") && b.querySelector("span").textContent.length > 1), "icon and label on each tool");
+    assert(document.querySelectorAll("#tools .tsep").length >= 4, "tools are grouped");
+    assert([...document.querySelectorAll("#bar .nb")].every(b => b.querySelector("svg.ic")), "top bar buttons have icons");
+    ui.paused = true; updateStatus(); assert($("#bpause").innerHTML.includes("svg"), "play icon"); ui.paused = false; updateStatus();
+    const r = $("#tools").getBoundingClientRect(); assert(r.bottom <= window.innerHeight && r.left >= 0, "dock on screen");
+    assert(parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dockh")) > 40, "overlays know the dock height");
+  }],
+  ["look", "Windows open as sheets on a phone and close with a swipe down", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" });
+    financeWin(); const w = document.querySelector(".win[data-id=fin]"), box = $("#wins");
+    if (window.innerWidth <= 640) {
+      assert(Math.abs(w.offsetTop + w.offsetHeight - box.clientHeight) < 2 && w.offsetWidth >= box.clientWidth - 1, "sheet along the bottom: " + (w.offsetTop + w.offsetHeight) + " / " + box.clientHeight);
+      const bar = w.querySelector(".wtitle"), ev = (t, y) => bar.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: 100, clientY: y, pointerId: 7 }));
+      ev("pointerdown", 400); ev("pointermove", 450); assert(w.style.transform.includes("50"), "sheet follows the finger"); ev("pointerup", 520);
+      assert(!document.querySelector(".win[data-id=fin]"), "swipe down closed it");
+    } else closeAllWins();
+  }],
+  ["look", "Money window shows summary cards and counts rewards as income", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" });
+    post("other", 10000); flushLedger(); financeWin();
+    const w = document.querySelector(".win[data-id=fin]"); assert(w.querySelectorAll(".card").length === 4, "four cards");
+    const row = [...w.querySelectorAll("tr.sum")].find(r => /Total income/.test(r.textContent)); assert(row && row.textContent.includes("10,000"), "reward counted as income: " + (row && row.textContent));
+    closeAllWins(); companyWin(); assert(document.querySelector(".win[data-id=company] .ring"), "rating ring"); closeAllWins();
+  }],
+  ["look", "Day and night: the light changes over five minutes of play and can be turned off", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed: "11" }); demoLine("road", "passengers", 2);
+    prefs.daynight = true; R.clock = 0; eq(darkness(), 0, "morning"); R.clock = DAYNIGHT_SECONDS * 0.75; eq(darkness(), 1, "night");
+    const t = S.map.towns[0]; view.z = 1.6; centerOn(t.x, t.y); draw(); assert(R.lights.length > 5 && R.lamps.length > 0, "windows and street lights at night: " + R.lights.length);
+    prefs.daynight = false; eq(darkness(), 0, "off"); prefs.daynight = true; R.clock = 0;
+  }],
+  ["look", "The map draws in every climate, zoom level and time of day", () => {
+    for (const climate of ["temperate", "arctic", "tropical", "toyland"]) {
+      startGame({ climate, difficulty: "easy", mapSize: 96, towns: 12, rivals: 0, startYear: 1950, seed: "3", water: 0.85 });
+      buildDemoShip(); simulateDays(10);
+      for (const z of [0.45, 1, 2.4]) for (const c of [0, DAYNIGHT_SECONDS * 0.6, DAYNIGHT_SECONDS * 0.75]) { view.z = z; R.clock = c; centerOn(S.map.towns[0].x, S.map.towns[0].y); draw(); }
+    }
+    R.clock = 0; view.z = 1.4;
+  }],
+  ["look", "Ground colours are cached and redrawn when the land changes", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" });
+    let t = null; for (let y = 5; y < 59 && !t; y++) for (let x = 5; x < 59 && !t; x++) if (!S.map.water[key(x, y)] && !S.map.occupied[key(x, y)] && S.map.height[key(x, y)] < 4) t = { x, y };
+    R.frame = 1; const [c1, j] = ground(t.x, t.y), before = c1.top[j];
+    R.frame = 2; assert(ground(t.x, t.y)[0] === c1, "same chunk reused");
+    S.company.cash = 1e6; const r = terrain.raiseTile(S.map, t.x, t.y, 1); assert(r.ok, r.reason);
+    R.frame = 3; const [c2] = ground(t.x, t.y); assert(c2 !== c1, "chunk rebuilt after raising land"); assert(typeof c2.top[j] === "string", "colour");
+  }],
+  ["look", "Settings: theme, day and night, and effects", () => {
+    settingsWin(); const sel = document.querySelector("#set-theme"); assert(sel, "theme setting");
+    sel.value = "dark"; sel.dispatchEvent(new Event("change", { bubbles: true })); eq(document.documentElement.dataset.theme, "dark", "dark theme");
+    sel.value = "system"; sel.dispatchEvent(new Event("change", { bubbles: true })); assert(!document.documentElement.dataset.theme, "follows the device");
+    assert(document.querySelector("#set-daynight") && document.querySelector("#set-effects"), "toggles"); closeAllWins();
+  }],
   ["game", "Building tools: bridge, raise, bulldoze", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "5" });
     S.company.cash = 900000; let found = 0, tried = 0; const m = S.map;

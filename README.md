@@ -15,6 +15,7 @@ Play it: open `dist/transport-co.html` in a browser, or the published Claude art
 - Town councils that rate your company, advertising and tree planting; rival companies that build roads, railways, tanker and air routes; buying shares and taking rivals over
 - Finances, loans, inflation, graphs, cargo payment chart, news, objectives, scenarios, retirement with a score and high-score table
 - Breakdowns for every vehicle, with emergency landings for planes
+- A modern look: lighting and shadows, living water, swaying trees, smoke, day and night, glass panels, an icon dock, light and dark mode
 - Save slots, autosave, export and import, cloud saves in your Claude account, online races on a shared map, settings with music, a first-game tutorial, a minimap, follow a vehicle, keyboard shortcuts, and a desktop layout
 
 ## Layout

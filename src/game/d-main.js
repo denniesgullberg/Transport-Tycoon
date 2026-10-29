@@ -90,6 +90,7 @@ function menuWin() {
 
 // -------------------------------------------------------------- bottom bar
 function wireBars() {
+  decorateChrome();
   $("#bpause").onclick = () => { ui.paused = !ui.paused; sound.play("click"); };
   document.querySelectorAll(".spd").forEach(b => b.onclick = () => { ui.speed = +b.dataset.s; ui.paused = false; });
   $("#bmenu").onclick = menuWin;
@@ -106,6 +107,7 @@ function wireBars() {
   $("#zout").onclick = () => zoomAt(cssW / 2, cssH / 2, clamp(view.z / 1.25, 0.45, 3));
   $("#go-new").onclick = () => { closeAllWins(); showMenu(); };
   window.addEventListener("resize", resize);
+  if (window.ResizeObserver) { const ro = new ResizeObserver(() => resize()); ro.observe($("#topbar")); ro.observe($("#tools")); }
   window.addEventListener("keydown", e => {
     if (!S || ui.menuOpen || e.target.tagName === "INPUT") return;
     if (e.key === " ") { ui.paused = !ui.paused; e.preventDefault(); }

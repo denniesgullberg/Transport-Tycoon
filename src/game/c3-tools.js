@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------- preferences
 // Per-player settings kept in this browser only.
 const PREFS_KEY = "tt-prefs";
-const prefs = Object.assign({ sounds: true, volume: 0.4, music: false, musicVolume: 0.25, autosaveMin: 1, labels: true, grid: false }, (() => {
+const prefs = Object.assign({ sounds: true, volume: 0.4, music: false, musicVolume: 0.25, autosaveMin: 1, labels: true, grid: false, daynight: true, effects: true, theme: "system" }, (() => {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {}; } catch (e) { return {}; }
 })());
 function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* storage blocked: settings last for this visit */ } }
@@ -9,6 +9,7 @@ function applyPrefs() {
   sound.setVolume(prefs.volume); sound.setMuted(!prefs.sounds);
   if (sound.setMusicVolume) sound.setMusicVolume(prefs.musicVolume);
   if (sound.setMusic) sound.setMusic(prefs.music);
+  if (prefs.theme === "light" || prefs.theme === "dark") document.documentElement.dataset.theme = prefs.theme; else delete document.documentElement.dataset.theme;
 }
 const esc = (t) => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -22,11 +23,15 @@ function settingsWin() {
       "<label class='set'>Music volume <input type='range' id='set-musicVolume' min='0' max='100' value='" + pct(prefs.musicVolume) + "'></label>" +
       "<label class='set'>Autosave <select id='set-autosave'>" + [[0, "Off"], [1, "Every minute"], [2, "Every 2 minutes"], [5, "Every 5 minutes"]].map(([v, l]) => "<option value='" + v + "'" + (prefs.autosaveMin === v ? " selected" : "") + ">" + l + "</option>").join("") + "</select></label>" +
       "<label class='set'><input type='checkbox' id='set-labels'" + (prefs.labels ? " checked" : "") + "> Town and industry names</label>" +
-      "<label class='set'><input type='checkbox' id='set-grid'" + (prefs.grid ? " checked" : "") + "> Grid lines</label>";
+      "<label class='set'><input type='checkbox' id='set-grid'" + (prefs.grid ? " checked" : "") + "> Grid lines</label>" +
+      "<label class='set'><input type='checkbox' id='set-daynight'" + (prefs.daynight ? " checked" : "") + "> Day and night</label>" +
+      "<label class='set'><input type='checkbox' id='set-effects'" + (prefs.effects ? " checked" : "") + "> Smoke, waves and swaying trees</label>" +
+      "<label class='set'>Look <select id='set-theme'>" + [["system", "Follow device"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => "<option value='" + v + "'" + (prefs.theme === v ? " selected" : "") + ">" + l + "</option>").join("") + "</select></label>";
     body.oninput = body.onchange = e => {
       const t = e.target, k = t.id.replace("set-", "");
       if (k === "volume" || k === "musicVolume") prefs[k] = +t.value / 100;
       else if (k === "autosave") prefs.autosaveMin = +t.value;
+      else if (k === "theme") prefs.theme = t.value;
       else if (k in prefs) prefs[k] = t.checked;
       savePrefs(); applyPrefs();
       if (e.type === "change" && (k === "sounds" || k === "volume")) sound.play("click");

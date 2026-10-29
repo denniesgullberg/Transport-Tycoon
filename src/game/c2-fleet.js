@@ -117,7 +117,7 @@ function fleetWin() {
     function render() {
       const all = playerVehicles(), list = rows();
       const count = t => all.filter(v => t === "all" || (t === "train" ? isTrain(v) : modelOf(v).type === t)).length;
-      let h = "<div class='chips'>" + [["all", "All"], ["bus", "Buses"], ["truck", "Trucks"], ["train", "Trains"]].map(([k, l]) => "<button data-f='" + k + "' class='" + (filter === k ? "on" : "") + "'>" + l + " (" + count(k) + ")</button>").join("") + "<button data-sort='1' class='" + (sort === "profit" ? "on" : "") + "'>Sort by profit</button><button data-ar='1'>Autoreplace</button></div>";
+      let h = "<div class='chips'>" + [["all", "All"], ["bus", "Buses"], ["truck", "Trucks"], ["train", "Trains"], ["ship", "Ships"], ["aircraft", "Planes"]].filter(([k]) => k === "all" || count(k) > 0).map(([k, l]) => "<button data-f='" + k + "' class='" + (filter === k ? "on" : "") + "'>" + l + " (" + count(k) + ")</button>").join("") + "<button data-sort='1' class='" + (sort === "profit" ? "on" : "") + "'>Sort by profit</button><button data-ar='1'>Autoreplace</button></div>";
       if (!list.length) h += "<p class='dim'>" + (all.length ? "No vehicles of this kind." : "You have no vehicles yet. Build a depot and tap Buy.") + "</p>";
       h += "<div class='fleet'>" + list.map(v => {
         const m = modelOf(v);
@@ -133,7 +133,7 @@ function fleetWin() {
       for (const el2 of body.querySelectorAll(".fv")) {
         const v = S.vehicles.find(x => x.id === el2.dataset.v); if (!v) continue;
         const [st, cls] = vehStatus(v), m = modelOf(v);
-        const se = el2.querySelector("[data-status]"); se.textContent = st + " · " + v.loaded + "/" + m.capacity + " " + v.cargo; se.className = cls;
+        const se = el2.querySelector("[data-status]"); se.textContent = st + " · " + v.loaded + "/" + m.capacity + " " + v.cargo; se.className = "st " + (cls || (v.state === "moving" ? "" : "idle"));
         const pe = el2.querySelector("[data-profit]"); pe.textContent = money(v.profit.thisYear); pe.className = "fp" + (v.profit.thisYear < 0 ? " neg" : "");
       }
     }
