@@ -321,6 +321,7 @@ function industryWin(i) {
     if (ins.length) h += "<div class='kv'><span>Delivered so far</span><b>" + ins.map(c => ((i.received || {})[c] || 0) + " " + c).join(", ") + "</b></div>";
     if (ins.length) h += "<div class='kv'><span>Waiting to process</span><b>" + (ins.map(c => (i.input[c] || 0) + " " + c).join(", ")) + "</b></div>";
     if (out) h += "<div class='kv'><span>Station rating</span><b>" + Math.round(serviceRatingOf(i.id) * 100) + "%</b></div>";
+    h += industryGrowthHtml(i);
     const cargos = [...(out ? [out] : []), ...ins.filter(c => c !== out)];
     for (const c of cargos) {
       const v = vehiclesFor(c);

@@ -434,7 +434,8 @@ function monthlyTick() {
   townMonthly();
   const m = S.map;
   const before = S.company.cash;
-  for (const i of m.industries) core.tickIndustryMonth(i, rng);
+  for (const i of m.industries) { core.tickIndustryMonth(i, rng); industryBonusOutput(i); }
+  industryMonth();
   for (const i of m.industries) { const r = serviceRatingOf(i.id); if (CARGO_FROM_IND[i.kind] && ["coalMine", "forest", "farm"].includes(i.kind)) core.serviceBonus(i, r, rng); }
   ST.monthlyCargo(S.stations, m.towns, m.industries, rng, PASSENGER_OUTPUT);
   ST.decayWaiting(S.stations);
@@ -450,7 +451,8 @@ function monthlyTick() {
   for (const a of actions) {
     if (a.kind === "setProduction") { const i = m.industries.find(x => x.id === a.industryId); if (i) i.productionPerMonth = a.value; }
     if (a.kind === "closeIndustry") removeIndustry(a.industryId);
-    if (a.kind === "openIndustry") { const ck = mapgen.CLIMATE_INDUSTRIES[S.cfg.climate] || []; if (!ck.includes(a.industryKind)) a.industryKind = ck.filter(k => k !== "oilRig")[Math.floor(rng() * Math.max(1, ck.length - 1))]; const s = mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) { const ni = m.industries[m.industries.length - 1]; if (PRIMARY.includes(ni.kind)) ni.productionPerMonth *= PRIMARY_OUTPUT; rebuildLookups(); } }
+    if (a.kind === "openIndustry") { const ck = mapgen.CLIMATE_INDUSTRIES[S.cfg.climate] || []; if (!ck.includes(a.industryKind)) a.industryKind = ck.filter(k => k !== "oilRig")[Math.floor(rng() * Math.max(1, ck.length - 1))]; const near = rng() < 0.4 ? a.near : { x: 8 + Math.floor(rng() * (m.w - 16)), y: 8 + Math.floor(rng() * (m.h - 16)) };   // anywhere on the map, not only by towns
+      const s = mapgen.addIndustry(m, a.industryKind, rng, near) || mapgen.addIndustry(m, a.industryKind, rng, a.near); if (s) { const ni = m.industries[m.industries.length - 1]; if (PRIMARY.includes(ni.kind)) ni.productionPerMonth *= PRIMARY_OUTPUT; ni.level = 1; rebuildLookups(); EV.addNews(S.news, S.date, "info", ni.name + " has opened.", { x: ni.x, y: ni.y }); } }
     if (a.kind === "setInterestRate") S.company.interestRate = a.value;
   }
   const reward = EV.checkObjectives(S.objectives, metricsNow(), S.date, S.news);

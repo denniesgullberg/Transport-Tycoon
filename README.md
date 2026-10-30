@@ -28,7 +28,7 @@ src/game/     The playable game in plain JS, joined in the order listed in scrip
               a3-content (climates, ships, aircraft, one-way roads), b-render (drawing),
               c-ui (input, tools, windows), c2-fleet (orders, fleet), c3-tools (settings,
               saves, undo), c4-vehicles (start/stop, renew, refit, stations), c5-world
-              (towns, rivals, shares, scenarios), c6-polish (tutorial, minimap, keys), c7-online (cloud saves, races),
+              (towns, rivals, shares, scenarios), c6-polish (tutorial, minimap, keys), c7-online (cloud saves, races), c8-industry (industry growth),
               d-main (menus, main loop, demos), e-tests (the test suite)
 scripts/      build.mjs makes dist/transport-co.html, test.mjs runs the tests headless
 dist/         The built game, ready to open or publish

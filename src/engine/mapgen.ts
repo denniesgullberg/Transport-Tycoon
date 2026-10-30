@@ -461,7 +461,8 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
   const kinds: IndustryKind[] = CLIMATE_INDUSTRIES[o.climate] || CLIMATE_INDUSTRIES.temperate;
   const nameCount = new Map<string, number>();
   for (const kind of kinds) {
-    const count = Math.max(1, Math.round(BASE_COUNT[kind] * o.industryScale));
+    // the number of each kind varies from map to map
+    const count = Math.max(1, Math.round(BASE_COUNT[kind] * o.industryScale * (0.7 + rng() * 0.6)));
     for (let n = 0; n < count; n++) {
       if (kind === "steelMill" && !industries.some(i => i.kind === "coalMine")) break;
       let best: { x: number; y: number } | null = null, bestScore = -Infinity;
@@ -479,16 +480,27 @@ export function generateMap(seed: string = randomSeed(), options: Partial<MapOpt
         industries.push({ id: `ind-${industries.length + 1}`, name: `${base} Oil Rig`, kind, x: best.x, y: best.y, footprint: 1, productionPerMonth: 40 + Math.floor(rng() * 41), input: {}, output: {} });
         continue;
       }
+      // Collect good spots, favour ones away from other industries, then pick one of the better
+      // spots at random rather than always the best, so industries turn up all over the map.
+      const cands: { x: number; y: number; sc: number }[] = [];
       for (let t = 0; t < 400; t++) {
         const x = 4 + Math.floor(rng() * (W - 8));
         const y = 4 + Math.floor(rng() * (H - 8));
         const st = rectStats(x - 2, y - 2, x + 2, y + 2);
         if (st.hasWater || st.mx - st.mn > 3) continue;
-        if (industries.some(i => Math.hypot(i.x - x, i.y - y) < 8)) continue;
+        let nearest = Infinity, same = Infinity;
+        for (const i of industries) { const d = Math.hypot(i.x - x, i.y - y); if (d < nearest) nearest = d; if (i.kind === kind && d < same) same = d; }
+        if (nearest < 8) continue;
         const nt = nearestTown(x, y);
         if (nt.edge < 5) continue;
         const sc = SCORES[kind](x, y, { td: nt.edge, fd: forestDensity(x, y), wd: waterDist[at(x, y)], h: height[at(x, y)] });
-        if (sc !== null && sc > bestScore) { bestScore = sc; best = { x, y }; }
+        if (sc === null) continue;
+        cands.push({ x, y, sc: sc + Math.min(nearest, 40) * 0.08 + Math.min(same, 60) * 0.06 + rng() * 4 });
+      }
+      if (cands.length) {
+        cands.sort((a, b) => b.sc - a.sc);
+        const pick = cands[Math.floor(Math.pow(rng(), 1.6) * Math.max(1, Math.ceil(cands.length * 0.5)))];
+        best = { x: pick.x, y: pick.y }; bestScore = pick.sc;
       }
       if (!best) continue;
 

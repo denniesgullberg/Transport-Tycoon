@@ -340,6 +340,7 @@ function drawIndustry(px, py, ind) {
     R.lights.push([px + 8, py - 40, 10, 0.8, "#ffb04a"]);
   } else {
     box(px, py - TH * 0.5, 2.5, 8, shadeC(c, 1.2), shadeC(c, 0.92), shadeC(c, 0.68));
+    drawIndustryGrowth(px, py - TH * 0.5, ind, c);
     if (tpl === "works") {
       chimneys(px, top, 2);
       box(px + 14, top + 6, 0.9, 12, shadeC(c, 1.35), shadeC(c, 1.1), shadeC(c, 0.85));

@@ -157,7 +157,7 @@ export function rollMonthlyEvents(
     const kind = kinds[Math.floor(rng() * kinds.length)];
     const town = ctx.towns[Math.floor(rng() * ctx.towns.length)];
     actions.push({ kind: "openIndustry", industryKind: kind, near: { x: town.x, y: town.y } });
-    addNews(log, date, "info", `Plans announced for a new ${PRETTY[kind] ?? kind} near ${town.name}.`, { x: town.x, y: town.y });
+    // the game posts the news once it has found a spot, since it may open anywhere on the map
   }
 
   // 5. Council funding offers (the player taps Accept in the news)

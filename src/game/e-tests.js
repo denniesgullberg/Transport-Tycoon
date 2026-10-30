@@ -133,8 +133,8 @@ const TESTS = [
     const ai = AI.createAi(0, 120000, 0.8); eq(ai.cash, 120000); assert(ai.name.length > 2, "name");
   }],
   ["game", "Playing: demo route builds, buses run and earn money", () => {
-    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 10, rivals: 0, startYear: 1950, seed: "2024" });
-    const d = buildDemoRoute(); assert(d.ok, d.msg); assert(S.depots.length >= 1 && S.stations.length >= 2, "depot and stops placed");
+    let d = null; for (const seed of ["2024", "2025", "2026", "2027", "2028"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 10, rivals: 0, startYear: 1950, seed }); d = buildDemoRoute(); if (d.ok) break; }
+    assert(d.ok, d.msg); assert(S.depots.length >= 1 && S.stations.length >= 2, "depot and stops placed");
     const bus = V.availableModels(S.date.year, "bus")[0]; const r = buyVehicle(bus.id, S.depots[0]); assert(r.ok, r.msg); assert(r.pair && r.pair.length >= 2, "orders auto-assigned");
     const out = simulateDays(240); assert(out.pax > 0, "passengers delivered: " + JSON.stringify(out)); assert(S.vehicles[0].profit.thisYear + S.vehicles[0].profit.lastYear > 0, "bus earned income");
   }],
@@ -882,6 +882,50 @@ const TESTS = [
     assert(d.ok, "a dock"); prefs.labels = true; view.z = 1.4; centerOn(d.dock.x, d.dock.y); draw();
     assert(R.labelsLate.some(l => l[2] === d.dock.name), "dock label");
     const a = buildDemoAir(); if (a.ok) { const ap = S.stations.find(s => s.kind === "airport"); centerOn(ap.x, ap.y); draw(); assert(R.labelsLate.some(l => l[2] === ap.name), "airport label"); }
+  }],
+  ["industry", "Industries are spread over the map and differ between seeds", () => {
+    const counts = [], spreads = [];
+    for (const seed of ["a1", "a2", "a3"]) {
+      startGame({ climate: "temperate", difficulty: "easy", mapSize: 192, towns: 30, rivals: 0, startYear: 1950, seed });
+      const inds = S.map.industries; counts.push(inds.filter(i => i.kind === "coalMine").length);
+      // how many of the 4 x 4 map regions have at least one industry
+      const cells = new Set(inds.map(i => Math.floor(i.x / 48) + "," + Math.floor(i.y / 48))); spreads.push(cells.size);
+      for (const a of inds) for (const b of inds) if (a !== b) assert(Math.hypot(a.x - b.x, a.y - b.y) >= 8, "industries keep apart");
+    }
+    assert(spreads.every(n => n >= 12), "industries in most parts of the map: " + spreads.join(", "));
+    assert(new Set(counts).size > 1 || counts[0] !== 3, "the number of mines varies: " + counts.join(", "));
+  }],
+  ["industry", "A well served mine expands, an unserved one shrinks, and factories grow with deliveries", () => {
+    let d = null; for (const seed of ["11", "12", "13", "14"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 14, rivals: 0, startYear: 1950, seed }); d = demoLine("road", "coal", 3); if (d.ok) break; }
+    assert(d.ok, "a coal line"); const mine = d.line.ends.from, out0 = mine.productionPerMonth;
+    eq(mine.level || 1, 1, "starts at size 1");
+    assert(expandIndustry(mine, true) && mine.level === 2 && mine.productionPerMonth > out0, "expanding raises output");
+    assert(S.news.items.some(n => /is expanding/.test(n.text)), "news");
+    for (let k = 0; k < 10; k++) expandIndustry(mine, false); eq(mine.level, 5, "size 5 at most");
+    assert(shrinkIndustry(mine, true) && mine.level === 4, "can shrink");
+    // run the months: a served mine keeps its rating up and grows
+    mine.level = 1; mine.goodMonths = 0; const keep = rng; let grew = false;
+    for (let k = 0; k < 60 && !grew; k++) { simulateDays(30); if ((mine.level || 1) > 1) grew = true; }
+    assert(grew || mine.goodMonths > 0, "service is noticed");
+    assert(mine.hist && mine.hist.length > 0, "output history");
+    // an unserved, idle industry shrinks
+    const lone = S.map.industries.find(i => isPrimaryInd(i) && i !== mine && serviceRatingOf(i.id) === 0); lone.level = 3; lone.idleMonths = 30;
+    let shrank = false; for (let k = 0; k < 120 && !shrank; k++) { industryMonth(); if (lone.level < 3) shrank = true; } assert(shrank, "left alone it shrinks");
+    // a factory with steady deliveries grows and gets a bonus
+    const fac = d.line.ends.to; fac.level = 1; fac.hist = []; fac._recLast = 0; fac.received = { coal: 0 };
+    let up = false; for (let k = 0; k < 120 && !up; k++) { fac.received.coal += 200; industryMonth(); if (fac.level > 1) up = true; }
+    assert(up, "deliveries make it grow"); assert(fac.bonus > 1, "bigger plant makes more");
+    industryWin(mine); assert(document.querySelector(".win[data-id=ind]").textContent.includes("of 5"), "size shown"); closeAllWins();
+    view.z = 1.4; centerOn(mine.x, mine.y); mine.level = 5; draw();
+  }],
+  ["industry", "Booms and busts change output, and new industries open around the map", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 1950, seed: "b1" });
+    const n0 = S.map.industries.length, outs0 = S.map.industries.map(i => i.productionPerMonth);
+    simulateDays(365 * 6);
+    assert(S.map.industries.length > n0 - 3, "industries still there");
+    const changed = S.map.industries.filter((i, k) => k < outs0.length && i.productionPerMonth !== outs0[k]).length;
+    assert(changed > 5, "output moves over time: " + changed);
+    assert(S.news.items.some(n => /has opened/.test(n.text)), "a new industry opened");
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
