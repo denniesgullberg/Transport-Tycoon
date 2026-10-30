@@ -128,6 +128,7 @@ function frame(now) {
       if (dayAcc > 4) dayAcc = 0;
       autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
+    edgeTick(dt); flingTick(dt);
     followTick();
     draw();
     drawMinimap(now);

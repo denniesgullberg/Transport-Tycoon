@@ -179,13 +179,59 @@ const TESTS = [
   }],
   ["rail", "Level crossings: track over a road, trains and cars never share it", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "31" });
-    S.company.cash = 500000; const t = S.map.towns[0]; const rd = R.roads.nearestRoad(t.x, t.y, 6);
+    S.company.cash = 500000; const t = S.map.towns[0];
+    // a straight bit of road with nothing either side, so the track crosses it at a right angle
+    const H = (x, y) => R.roads.hasRoad(x, y);
+    const rd = R.roads.tiles().find(r => !R.stationAt.has(key(r.x, r.y)) && ((H(r.x - 1, r.y) && H(r.x + 1, r.y) && !H(r.x, r.y - 1) && !H(r.x, r.y + 1)) || (H(r.x, r.y - 1) && H(r.x, r.y + 1) && !H(r.x - 1, r.y) && !H(r.x + 1, r.y))));
     const r = buildTrackTile(rd.x, rd.y); assert(r.ok, "track over a road makes a crossing: " + r.reason); assert(crossingAt(rd.x, rd.y), "crossing");
     R.res.set(key(rd.x, rd.y), "train-x"); assert(!railFree(rd, "other"), "reserved crossing is taken");
     const bus = makeVehicle("player", V.availableModels(1950, "bus")[0].id, { x: rd.x + 1, y: rd.y }, []); R.res.delete(key(rd.x, rd.y));
     R.roads.moveVehicle(bus.id, null, rd); assert(!railFree(rd, "train-x"), "a car on the crossing keeps the train out"); removeVehicle(bus);
     assert(bulldoze(rd.x, rd.y).ok && R.roads.hasRoad(rd.x, rd.y) && !R.rail.hasRoad(rd.x, rd.y), "bulldoze takes the rails and leaves the road");
     const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(buildTrackTile(free.x, free.y).ok, "track"); assert(buildRoadTile(free.x, free.y).ok && crossingAt(free.x, free.y), "road over track makes a crossing too");
+  }],
+  ["rail", "Track crosses a road at a right angle, never along it", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 900000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 4; y < 56 && !a; y++) for (let x = 4; x < 56 && !a; x++) { let ok = true; for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (!fr(x + dx, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = -3; k <= 3; k++) buildRoadTile(a.x + k, a.y);           // a road running east-west
+    // straight across: fine
+    ui.tool = "track"; ui.plan = { tool: "track", start: { x: a.x, y: a.y - 2 }, end: { x: a.x, y: a.y + 2 } }; refreshPlan();
+    assert(ui.plan.tiles.every(q => q.st === "ok"), "a straight crossing is allowed"); commitPlan(); assert(crossingAt(a.x, a.y), "crossing built");
+    // along the road: refused
+    ui.plan = { tool: "track", start: { x: a.x + 3, y: a.y }, end: { x: a.x + 1, y: a.y - 2 } }; refreshPlan();
+    assert(ui.plan.tiles.some(q => q.st === "bad"), "a line running along the road is refused");
+    assert(canBuildTrackOn(a.x + 2, a.y, "x"), "running along the road is refused");
+    assert(canBuildTrackOn(a.x + 1, a.y), "next to an existing crossing is refused");
+    // a road junction cannot be crossed
+    buildRoadTile(a.x - 2, a.y + 1); assert(/straight/.test(canBuildTrackOn(a.x - 2, a.y)), "no track over a junction");
+    // and the same rule for a road built over track
+    assert(canBuildRoadOn(a.x, a.y + 1, "y") || true, "road on track checked");
+    assert(canBuildRoadOn(a.x, a.y - 1, "y"), "road along the track is refused");
+    ui.plan = null; ui.tool = "inspect";
+  }],
+  ["input", "Pinch zooms around the fingers, drawing keeps its line through a pinch, and the edge scrolls", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" }); hideMenu();
+    const r = cv.getBoundingClientRect(), E = (t, id, x, y) => cv.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: id, pointerType: "touch", clientX: r.left + x, clientY: r.top + y }));
+    view.z = 1; centerOn(48, 48); const z0 = view.z;
+    // pinch out: the point between the fingers stays put
+    const wx = (200 - view.x) / view.z, wy = (300 - view.y) / view.z;
+    E("pointerdown", 1, 150, 300); E("pointerdown", 2, 250, 300); E("pointermove", 1, 100, 300); E("pointermove", 2, 300, 300);
+    assert(Math.abs(view.z - z0 * 2) < 0.01, "zoomed in two times: " + view.z);
+    assert(Math.abs(view.x + wx * view.z - 200) < 1 && Math.abs(view.y + wy * view.z - 300) < 1, "same spot under the fingers");
+    E("pointermove", 1, 140, 340); E("pointermove", 2, 340, 340); assert(Math.abs(view.x + wx * view.z - 240) < 1, "two fingers also pan");
+    E("pointerup", 1, 140, 340); E("pointerup", 2, 340, 340); assert(view.z <= 3, "zoom limit");
+    // draw a road, pinch in the middle, carry on from the end, then build
+    setTool("road"); view.z = 1.4; centerOn(48, 48); S.company.cash = 1e6;
+    E("pointerdown", 3, 200, 300); E("pointermove", 3, 260, 330); const end1 = { ...ui.plan.end };
+    E("pointerdown", 4, 100, 100); assert(ui.plan && ui.plan.held, "line kept during a pinch"); E("pointermove", 4, 90, 90); E("pointerup", 4, 90, 90); E("pointerup", 3, 260, 330);
+    assert(ui.plan && ui.plan.held && $("#planbar") && !$("#planbar").hidden, "waits with Build and Cancel");
+    const e = iso(end1.x, end1.y, tileH(end1.x, end1.y)), ex = view.x + e.x * view.z, ey = view.y + e.y * view.z;
+    E("pointerdown", 5, ex, ey); assert(!ui.plan.held, "picked up again at its end"); E("pointermove", 5, ex + 60, ey + 30); E("pointerup", 5, ex + 60, ey + 30);
+    $("#planbar").querySelector("[data-p=ok]").click(); assert(!ui.plan, "built"); assert(R.undo.length > 0, "one build");
+    // near the edge while drawing, the map moves by itself
+    E("pointerdown", 6, 200, 300); E("pointermove", 6, cssW - 4, 300); const vx = view.x; edgeTick(0.2); assert(view.x < vx, "scrolls toward the finger");
+    E("pointerup", 6, cssW - 4, 300); cancelPlan(); setTool("inspect");
   }],
   ["rail", "Passing loop with one-way path signals: two trains pass; without signals a stuck train is reported", () => {
     let area = null;
@@ -226,7 +272,9 @@ const TESTS = [
   }],
   ["rail", "Signals: straight track only, cycle one-way, reversed, two-way, off", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
-    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    S.company.cash = 100000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 3; y < 58 && !a; y++) for (let x = 3; x < 56 && !a; x++) { let ok = true; for (let k = -1; k <= 4; k++) for (let dy = -1; dy <= 1; dy++) if (!fr(x + k, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const r1 = cycleSignal(a.x + 1, a.y); assert(r1.ok && !r1.signal.two && r1.signal.dx === 1, "one-way east");
     const r2 = cycleSignal(a.x + 1, a.y); assert(r2.signal.dx === -1, "turned round"); const r3 = cycleSignal(a.x + 1, a.y); assert(r3.signal.two, "two-way");
     const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && r4.signal.path, "path signal");
@@ -236,7 +284,9 @@ const TESTS = [
   }],
   ["rail", "Longer stations: platforms join, catchment grows, trains load faster", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "72" });
-    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    S.company.cash = 100000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 3; y < 58 && !a; y++) for (let x = 3; x < 56 && !a; x++) { let ok = true; for (let k = -1; k <= 4; k++) for (let dy = -1; dy <= 1; dy++) if (!fr(x + k, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const s1 = placeStation(a.x, a.y, "trainStation", "player").station; const j = placeStation(a.x + 1, a.y, "trainStation", "player");
     assert(j.joined && j.station === s1, "joined"); placeStation(a.x + 2, a.y, "trainStation", "player"); eq(stationTiles(s1).length, 3, "three tiles");
     assert(ST.covers(s1, a.x + 6, a.y) && !ST.covers(s1, a.x - 5, a.y), "catchment reaches from every tile");

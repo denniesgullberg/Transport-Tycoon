@@ -100,12 +100,15 @@ function planTiles(a, b) {
   return pts;
 }
 function startPlan(t) { if (!t) return; ui.plan = { tool: ui.tool, start: t, end: t }; refreshPlan(); }
-function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); }
+function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); if (Math.abs(t.x - ui.plan.start.x) + Math.abs(t.y - ui.plan.start.y) > 0) { const a = iso(ui.plan.start.x, ui.plan.start.y, 0), sx = view.x + a.x * view.z, sy = view.y + a.y * view.z; if (sx < 0 || sy < 0 || sx > cssW || sy > cssH) ui.plan.long = true; } }
 function refreshPlan() {
   const p = ui.plan, track = p.tool === "track", wire = p.tool === "electrify", unit = cost(wire ? ELEC_COST : track ? TRACK_COST : ROAD_COST);
   let total = 0, fresh = 0, bad = 0, blocked = false;
-  p.tiles = planTiles(p.start, p.end).map(q => {
-    const why = wire ? canElectrify(q.x, q.y) : track ? canBuildTrackOn(q.x, q.y) : canBuildRoadOn(q.x, q.y);
+  const pts = planTiles(p.start, p.end);
+  // which way the line runs through each tile, so crossings can be checked
+  pts.forEach((q, k) => { const ax = (a, b) => a && b ? (a.x !== b.x ? "x" : "y") : null; const i = ax(pts[k - 1], q), o = ax(q, pts[k + 1]); q.along = i && o && i !== o ? "corner" : i || o || null; });
+  p.tiles = pts.map(q => {
+    const why = wire ? canElectrify(q.x, q.y) : track ? canBuildTrackOn(q.x, q.y, q.along) : canBuildRoadOn(q.x, q.y, q.along);
     if (why === "exists") return { ...q, st: "have" };
     if (why || blocked) { blocked = true; bad++; return { ...q, st: "bad", why }; }
     const c = unit + (!wire && S.map.forest[key(q.x, q.y)] ? cost(CLEAR_TREE) : 0) + (!wire && (track ? R.roads : R.rail).hasRoad(q.x, q.y) ? cost(CROSSING_EXTRA) : 0); total += c; fresh++;
@@ -116,12 +119,12 @@ function refreshPlan() {
   $("#hint").textContent = fresh || bad ? name + ": " + fresh + " new tile" + (fresh === 1 ? "" : "s") + ", " + money(total) + (bad ? ". Stops before a blocked tile." : "") + (total > S.company.cash ? " Not enough money." : "") : name + ": already built here.";
 }
 function commitPlan() {
-  const p = ui.plan; ui.plan = null; if (!p || !p.tiles) return;
+  const p = ui.plan; ui.plan = null; const bar = document.getElementById("planbar"); if (bar) bar.hidden = true; if (!p || !p.tiles) return;
   const built = []; let spent = 0;
   for (const q of p.tiles) {
     if (q.st === "bad") { if (q.why && q.why !== "exists") toast(q.why, true); break; }
     if (q.st !== "ok") continue;
-    const r = p.tool === "electrify" ? electrifyTile(q.x, q.y) : p.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y);
+    const r = p.tool === "electrify" ? electrifyTile(q.x, q.y) : p.tool === "track" ? buildTrackTile(q.x, q.y, true, q.along) : buildRoadTile(q.x, q.y, true, q.along);
     if (!r.ok) { toast(r.reason, true); break; }
     if (r.cost) { built.push({ x: q.x, y: q.y }); spent += r.cost; }
   }

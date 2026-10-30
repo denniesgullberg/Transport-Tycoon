@@ -521,16 +521,31 @@ function nameStation(kind, x, y) {
   for (const c of cands) if (!taken.has(c)) return c;
   for (let n = 2; ; n++) { const c = t.name + " " + dir + suf + " " + n; if (!taken.has(c)) return c; }
 }
-function canBuildRoadOn(x, y) {
+// A road and a railway may only cross at right angles, one tile at a time: the existing line must
+// be straight there, the new one must run across it, and the tiles before and after must be clear of
+// the other line. `along` is the axis the new line runs on ("x", "y", "corner") when known.
+function crossOk(x, y, other, mine, along, what, over) {
+  const has = (n, dx, dy) => inB(x + dx, y + dy) && n.hasRoad(x + dx, y + dy);
+  const ox = has(other, 1, 0) || has(other, -1, 0), oy = has(other, 0, 1) || has(other, 0, -1);
+  const no = what + " can only cross " + over + " at a right angle, one tile at a time.";
+  if (along === "corner") return no;
+  if (ox && oy) return what + " can only cross a straight " + over.replace(/^an? /, "") + ".";
+  const oAxis = ox ? "x" : oy ? "y" : null, axis = along || (oAxis ? (oAxis === "x" ? "y" : "x") : null);
+  if (oAxis && axis === oAxis) return no;
+  if (oAxis && (oAxis === "x" ? has(mine, 1, 0) || has(mine, -1, 0) : has(mine, 0, 1) || has(mine, 0, -1))) return no;
+  if (axis && (axis === "x" ? has(other, 1, 0) || has(other, -1, 0) : has(other, 0, 1) || has(other, 0, -1))) return no;
+  return "";
+}
+function canBuildRoadOn(x, y, along) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build on water. Use the Bridge tool from a road end.";
   if (R.roads.hasRoad(x, y)) return "exists";
-  if (R.rail.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A station or depot is in the way." : S.spans[i] ? "A road cannot cross a rail bridge or tunnel." : "";
+  if (R.rail.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A station or depot is in the way." : S.spans[i] ? "A road cannot cross a rail bridge or tunnel." : crossOk(x, y, R.rail, R.roads, along, "A road", "a railway");
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
-function buildRoadTile(x, y, ownerPays = true) {
-  const why = canBuildRoadOn(x, y);
+function buildRoadTile(x, y, ownerPays = true, along) {
+  const why = canBuildRoadOn(x, y, along);
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
@@ -539,16 +554,16 @@ function buildRoadTile(x, y, ownerPays = true) {
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
 }
-function canBuildTrackOn(x, y) {
+function canBuildTrackOn(x, y, along) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build track on water. Use the Bridge tool from a track end.";
   if (R.rail.hasRoad(x, y)) return "exists";
-  if (R.roads.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A stop or depot is in the way." : S.spans[i] ? "Track cannot cross a road bridge or tunnel." : "";
+  if (R.roads.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A stop or depot is in the way." : S.spans[i] ? "Track cannot cross a road bridge or tunnel." : crossOk(x, y, R.roads, R.rail, along, "Track", "a road");
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
-function buildTrackTile(x, y, ownerPays = true) {
-  const why = canBuildTrackOn(x, y);
+function buildTrackTile(x, y, ownerPays = true, along) {
+  const why = canBuildTrackOn(x, y, along);
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);

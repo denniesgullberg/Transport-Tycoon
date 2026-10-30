@@ -92,11 +92,11 @@ const TOOL_SHORT = { busStop: "Bus stop", truckStop: "Truck stop", trainStation:
 // ---- tools
 const TOOLS = [
   ["inspect", "Inspect", "Tap a vehicle, stop, depot, town or industry for details. Drag to move the map."],
-  ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to paint a road."],
+  ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to draw. Use two fingers to move or zoom without losing the line."],
   ["busStop", "Bus stop", () => "Bus stop: " + money(cost(STATION_COST)) + ". Tap a road tile near houses. Its catchment is highlighted."],
   ["truckStop", "Truck stop", () => "Truck stop: " + money(cost(STATION_COST)) + ". Tap a road tile within 3 tiles of a mine, farm, forest or factory."],
   ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile or the land beside one. Vehicles are bought and serviced here."],
-  ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
+  ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Two fingers move or zoom without losing it. Track crosses roads only at a right angle."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
   ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile or the land beside one. Trains are built and serviced here."],
   ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Each tap changes it: block one way, turned round, two-way, path signal one way, turned round, off."],
@@ -125,6 +125,7 @@ function buildToolbar() {
   const u = el("button", "tool undo", icon("undo") + "<span>Undo</span>"); u.id = "bundo"; u.onclick = () => { const r = undoLast(); toast(r.ok ? "Undone. Refunded " + money(r.cost) + "." : r.reason, !r.ok); }; tb.appendChild(u); updateUndoBtn();
 }
 function setTool(id) {
+  if (ui.plan && ui.plan.held && ui.plan.tool !== id) { ui.plan = null; const b = document.getElementById("planbar"); if (b) b.hidden = true; }
   ui.tool = id; ui.overlay = null;
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === id));
   const t = TOOLS.find(x => x[0] === id); const h = typeof t[2] === "function" ? t[2]() : t[2];
@@ -147,37 +148,115 @@ function updateStatus() {
 }
 
 // ---- input
+// One finger: tap, drag the map, or (with Road, Track or Electrify) draw a line. Two fingers: pan and
+// pinch-zoom at any time, also in the middle of drawing; the drawn line is kept. Near the edge of the
+// screen the map scrolls by itself while drawing, so a line can be as long as you like.
 const ptrs = new Map();
-let tap = null, pinch = null, painting = false;
+let tap = null, pinch = null, painting = false, fling = null;
+const PAINT_TOOLS = ["road", "track", "electrify"];
+const ZMIN = 0.45, ZMAX = 3;
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function twoFinger() { const [a, b] = [...ptrs.values()]; return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)) }; }
 cv.addEventListener("pointerdown", e => {
   if (!S) return;
-  cv.setPointerCapture(e.pointerId); const p = pos(e); ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; ui.plan = null; setTool(ui.tool); return; }
-  tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now() };
-  if (ui.tool === "road" || ui.tool === "track" || ui.tool === "electrify") { painting = true; startPlan(screenToTile(p.x, p.y)); }
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+  const p = pos(e); ptrs.set(e.pointerId, { x: p.x, y: p.y, t: performance.now() }); fling = null;
+  if (ptrs.size === 2) {
+    // a second finger: stop drawing for now but keep the line, and pan and zoom instead
+    const f = twoFinger(); pinch = { ...f, z: view.z, vx: view.x, vy: view.y };
+    if (painting) { painting = false; if (ui.plan) ui.plan.held = true; }
+    tap = null; return;
+  }
+  if (ptrs.size > 2) return;
+  const touch = e.pointerType === "touch";
+  tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now(), slop: touch ? 10 : 5, hist: [] };
+  if (PAINT_TOOLS.includes(ui.tool)) {
+    const t = screenToTile(p.x, p.y);
+    // a held line carries on from its end if you put your finger back near it
+    if (ui.plan && ui.plan.held && ui.plan.tool === ui.tool && t && Math.abs(t.x - ui.plan.end.x) + Math.abs(t.y - ui.plan.end.y) <= 1) { painting = true; ui.plan.held = false; }
+    else if (!ui.plan || !ui.plan.held) { painting = true; startPlan(t); }
+    else tap.keepPlan = true;   // a drag elsewhere moves the map; a tap elsewhere starts again
+  }
 });
 cv.addEventListener("pointermove", e => {
   const p = pos(e);
   if (!S) return;
-  if (!ptrs.has(e.pointerId)) { ui.hover = screenToTile(p.x, p.y); updateOverlay(); return; }
-  ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; const nz = clamp(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, 0.45, 3); zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, nz); return; }
+  if (!ptrs.has(e.pointerId)) { if (e.pointerType !== "touch") { ui.hover = screenToTile(p.x, p.y); updateOverlay(); } return; }
+  ptrs.set(e.pointerId, { x: p.x, y: p.y, t: performance.now() });
+  if (ptrs.size === 2 && pinch) {
+    const f = twoFinger(), nz = clamp(pinch.z * f.d / pinch.d, ZMIN, ZMAX);
+    // keep the point under the fingers' midpoint fixed while it moves and the zoom changes
+    const wx = (pinch.mx - pinch.vx) / pinch.z, wy = (pinch.my - pinch.vy) / pinch.z;
+    view.z = nz; view.x = f.mx - wx * nz; view.y = f.my - wy * nz; ui.follow = null;
+    return;
+  }
   if (!tap) return;
-  if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
-  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
-  if (tap.moved) { ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
+  if (Math.hypot(p.x - tap.x, p.y - tap.y) > tap.slop) tap.moved = true;
+  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); ui.edge = edgeScroll(p); return; }
+  if (tap.moved) {
+    ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y);
+    tap.hist.push({ x: p.x, y: p.y, t: performance.now() }); if (tap.hist.length > 6) tap.hist.shift();
+  }
 });
+// how fast to scroll when a drawing finger is near the edge of the map (pixels per second)
+function edgeScroll(p) {
+  const m = 44, top = (parseInt(getComputedStyle(document.documentElement).getPropertyValue("--toph")) || 100) - cv.getBoundingClientRect().top, bot = cssH - ((parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dockh")) || 80));
+  const f = (d) => d < m ? (1 - d / m) * 520 : 0;
+  const vx = f(p.x) - f(cssW - p.x), vy = f(p.y - top) - f(bot - p.y);
+  return vx || vy ? { vx, vy, p } : null;
+}
+function edgeTick(dt) {
+  if (!painting || !ui.edge) return;
+  view.x += ui.edge.vx * dt; view.y += ui.edge.vy * dt;
+  ui.hover = screenToTile(ui.edge.p.x, ui.edge.p.y); updatePlan(ui.hover);
+}
+function flingTick(dt) {
+  if (!fling) return;
+  view.x += fling.vx * dt; view.y += fling.vy * dt;
+  const k = Math.exp(-dt * 5); fling.vx *= k; fling.vy *= k;
+  if (Math.hypot(fling.vx, fling.vy) < 20) fling = null;
+}
 function endPtr(e) {
-  const p = pos(e); ptrs.delete(e.pointerId);
+  if (!ptrs.has(e.pointerId)) return;
+  const p = pos(e); ptrs.delete(e.pointerId); ui.edge = null;
+  if (ptrs.size === 1 && pinch) {
+    // back to one finger after a pinch: carry on moving the map from here, without a jump
+    pinch = null; const [q] = [...ptrs.values()]; tap = { x: q.x, y: q.y, vx: view.x, vy: view.y, moved: true, t: performance.now(), slop: 10, hist: [] }; return;
+  }
   if (ptrs.size < 2) pinch = null;
-  if (painting && ptrs.size === 0) commitPlan();
-  else if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
-  if (ptrs.size === 0) { tap = null; painting = false; }
+  if (ptrs.size > 0) return;
+  if (painting) {
+    painting = false;
+    if (tap && !tap.moved && ui.plan && ui.plan.tiles && ui.plan.tiles.length === 1) commitPlan();
+    else if (ui.plan && (ui.plan.held || ui.plan.long)) { ui.plan.held = true; showPlanBar(); }
+    else commitPlan();
+  } else if (tap && !tap.moved) {
+    if (tap.keepPlan) { cancelPlan(); }
+    else onTap(p);
+  } else if (tap && tap.moved && tap.hist.length >= 2 && e.pointerType === "touch") {
+    // let the map glide on after a quick swipe
+    const a = tap.hist[0], b = tap.hist[tap.hist.length - 1], dt = (b.t - a.t) / 1000;
+    if (dt > 0 && performance.now() - b.t < 80) { const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt; if (Math.hypot(vx, vy) > 300) fling = { vx: clamp(vx, -3000, 3000), vy: clamp(vy, -3000, 3000) }; }
+  }
+  if (ui.plan && ui.plan.held) showPlanBar();
+  tap = null;
 }
 cv.addEventListener("pointerup", endPtr); cv.addEventListener("pointercancel", endPtr);
-cv.addEventListener("wheel", e => { e.preventDefault(); const p = pos(e); zoomAt(p.x, p.y, clamp(view.z * (e.deltaY < 0 ? 1.12 : 0.89), 0.45, 3)); }, { passive: false });
+cv.addEventListener("wheel", e => { e.preventDefault(); const p = pos(e); const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)); zoomAt(p.x, p.y, clamp(view.z * f, ZMIN, ZMAX)); }, { passive: false });
+// stop the page itself from zooming or scrolling on a pinch (Safari sends its own gesture events)
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
 function zoomAt(sx, sy, nz) { const wx = (sx - view.x) / view.z, wy = (sy - view.y) / view.z; view.z = nz; view.x = sx - wx * nz; view.y = sy - wy * nz; }
+// A line that was paused by a pinch, or that ran off the screen, waits here to be built or dropped.
+function showPlanBar() {
+  let bar = $("#planbar");
+  if (!bar) { bar = el("div", "glass"); bar.id = "planbar"; $("#stage").appendChild(bar); }
+  const p = ui.plan; if (!p || !p.tiles) { bar.hidden = true; return; }
+  const n = p.tiles.filter(q => q.st === "ok").length;
+  bar.hidden = false;
+  bar.innerHTML = "<span>" + n + " tile" + (n === 1 ? "" : "s") + " · " + money(p.cost || 0) + "</span><button class='gb' data-p='no'>Cancel</button><button class='gb go' data-p='ok'>Build</button>";
+  bar.onclick = ev => { const b = ev.target.closest("button"); if (!b) return; if (b.dataset.p === "ok") commitPlan(); else cancelPlan(); bar.hidden = true; };
+}
+function cancelPlan() { ui.plan = null; const bar = $("#planbar"); if (bar) bar.hidden = true; setTool(ui.tool); }
 function updateOverlay() {
   ui.overlay = null;
   const t = ui.hover; if (!t || !S) return;

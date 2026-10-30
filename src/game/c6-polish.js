@@ -100,7 +100,7 @@ const KEYS = [
 const KEY_TOOLS = { i: "inspect", r: "road", t: "track", s: "signal", b: "busStop", k: "truckStop", n: "trainStation", d: "depot", p: "railDepot", l: "raise", o: "lower", x: "bulldoze" };
 function helpWin() {
   openWin("help", "Keys and help", body => {
-    body.innerHTML = "<p class='dim'>On a phone: drag to move the map, pinch to zoom, tap to use the tool. Right-click on a computer goes back to Inspect.</p><table class='tb'>" + KEYS.map(([k, d]) => "<tr><td><b>" + k + "</b></td><td>" + d + "</td></tr>").join("") + "</table>";
+    body.innerHTML = "<p class='dim'>On a phone: drag to move the map, pinch with two fingers to zoom, tap to use the tool. While drawing a road or track you can pinch or move to the edge of the screen; the line waits with Build and Cancel. Right-click on a computer goes back to Inspect.</p><table class='tb'>" + KEYS.map(([k, d]) => "<tr><td><b>" + k + "</b></td><td>" + d + "</td></tr>").join("") + "</table>";
     body.appendChild(btn("Start the tutorial", () => { closeWin("help"); tutorialStart(); }));
   });
 }

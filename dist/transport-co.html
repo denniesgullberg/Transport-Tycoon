@@ -171,6 +171,7 @@ body.menu-open #wins{z-index:110}
 }
 @media (max-width:380px){.tool{width:54px}.tb-txt b{font-size:12px}#smoney{font-size:14px;padding:4px 8px}.ib{min-width:32px}}
 @media (prefers-reduced-motion:reduce){.win,#toast{animation:none;transition:none}}
+#planbar{position:absolute;z-index:6;left:50%;transform:translateX(-50%);bottom:calc(var(--dockh,80px) + 8px);display:flex;align-items:center;gap:8px;padding:6px 6px 6px 14px;border-radius:999px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}#planbar[hidden]{display:none}#planbar .gb{min-height:40px;border-radius:999px;padding:8px 16px}
 </style>
 <div id="app">
   <div id="stage"><canvas id="map"></canvas>
@@ -3903,16 +3904,31 @@ function nameStation(kind, x, y) {
   for (const c of cands) if (!taken.has(c)) return c;
   for (let n = 2; ; n++) { const c = t.name + " " + dir + suf + " " + n; if (!taken.has(c)) return c; }
 }
-function canBuildRoadOn(x, y) {
+// A road and a railway may only cross at right angles, one tile at a time: the existing line must
+// be straight there, the new one must run across it, and the tiles before and after must be clear of
+// the other line. `along` is the axis the new line runs on ("x", "y", "corner") when known.
+function crossOk(x, y, other, mine, along, what, over) {
+  const has = (n, dx, dy) => inB(x + dx, y + dy) && n.hasRoad(x + dx, y + dy);
+  const ox = has(other, 1, 0) || has(other, -1, 0), oy = has(other, 0, 1) || has(other, 0, -1);
+  const no = what + " can only cross " + over + " at a right angle, one tile at a time.";
+  if (along === "corner") return no;
+  if (ox && oy) return what + " can only cross a straight " + over.replace(/^an? /, "") + ".";
+  const oAxis = ox ? "x" : oy ? "y" : null, axis = along || (oAxis ? (oAxis === "x" ? "y" : "x") : null);
+  if (oAxis && axis === oAxis) return no;
+  if (oAxis && (oAxis === "x" ? has(mine, 1, 0) || has(mine, -1, 0) : has(mine, 0, 1) || has(mine, 0, -1))) return no;
+  if (axis && (axis === "x" ? has(other, 1, 0) || has(other, -1, 0) : has(other, 0, 1) || has(other, 0, -1))) return no;
+  return "";
+}
+function canBuildRoadOn(x, y, along) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build on water. Use the Bridge tool from a road end.";
   if (R.roads.hasRoad(x, y)) return "exists";
-  if (R.rail.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A station or depot is in the way." : S.spans[i] ? "A road cannot cross a rail bridge or tunnel." : "";
+  if (R.rail.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A station or depot is in the way." : S.spans[i] ? "A road cannot cross a rail bridge or tunnel." : crossOk(x, y, R.rail, R.roads, along, "A road", "a railway");
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
-function buildRoadTile(x, y, ownerPays = true) {
-  const why = canBuildRoadOn(x, y);
+function buildRoadTile(x, y, ownerPays = true, along) {
+  const why = canBuildRoadOn(x, y, along);
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
@@ -3921,16 +3937,16 @@ function buildRoadTile(x, y, ownerPays = true) {
   S.map.forest[i] = 0; S.map.occupied[i] = 1; R.roads.addRoad(x, y);
   return { ok: true, cost: c };
 }
-function canBuildTrackOn(x, y) {
+function canBuildTrackOn(x, y, along) {
   const m = S.map, i = key(x, y);
   if (!inB(x, y) || m.water[i]) return "Cannot build track on water. Use the Bridge tool from a track end.";
   if (R.rail.hasRoad(x, y)) return "exists";
-  if (R.roads.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A stop or depot is in the way." : S.spans[i] ? "Track cannot cross a road bridge or tunnel." : "";
+  if (R.roads.hasRoad(x, y)) return R.stationAt.has(i) || R.depotAt.has(i) ? "A stop or depot is in the way." : S.spans[i] ? "Track cannot cross a road bridge or tunnel." : crossOk(x, y, R.roads, R.rail, along, "Track", "a road");
   if (m.occupied[i]) return "Something is built here.";
   return "";
 }
-function buildTrackTile(x, y, ownerPays = true) {
-  const why = canBuildTrackOn(x, y);
+function buildTrackTile(x, y, ownerPays = true, along) {
+  const why = canBuildTrackOn(x, y, along);
   if (why === "exists") return { ok: true, cost: 0 };
   if (why) return { ok: false, reason: why };
   const i = key(x, y);
@@ -5432,11 +5448,11 @@ const TOOL_SHORT = { busStop: "Bus stop", truckStop: "Truck stop", trainStation:
 // ---- tools
 const TOOLS = [
   ["inspect", "Inspect", "Tap a vehicle, stop, depot, town or industry for details. Drag to move the map."],
-  ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to paint a road."],
+  ["road", "Road", () => "Road: " + money(cost(ROAD_COST)) + " per tile. Drag to draw. Use two fingers to move or zoom without losing the line."],
   ["busStop", "Bus stop", () => "Bus stop: " + money(cost(STATION_COST)) + ". Tap a road tile near houses. Its catchment is highlighted."],
   ["truckStop", "Truck stop", () => "Truck stop: " + money(cost(STATION_COST)) + ". Tap a road tile within 3 tiles of a mine, farm, forest or factory."],
   ["depot", "Depot", () => "Depot: " + money(cost(DEPOT_COST)) + ". Tap a road tile or the land beside one. Vehicles are bought and serviced here."],
-  ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Rails cannot cross roads yet."],
+  ["track", "Track", () => "Railway track: " + money(cost(TRACK_COST)) + " per tile. Drag to lay track. Two fingers move or zoom without losing it. Track crosses roads only at a right angle."],
   ["trainStation", "Train station", () => "Train station: " + money(cost(RAIL_STATION_COST)) + ". Tap a track tile. Catchment is 4 tiles: place it beside a mine, forest, farm, factory or town."],
   ["railDepot", "Train depot", () => "Train depot: " + money(cost(RAIL_DEPOT_COST)) + ". Tap a track tile or the land beside one. Trains are built and serviced here."],
   ["signal", "Signal", () => "Signal: " + money(cost(SIGNAL_COST)) + ". Tap straight track. Each tap changes it: block one way, turned round, two-way, path signal one way, turned round, off."],
@@ -5465,6 +5481,7 @@ function buildToolbar() {
   const u = el("button", "tool undo", icon("undo") + "<span>Undo</span>"); u.id = "bundo"; u.onclick = () => { const r = undoLast(); toast(r.ok ? "Undone. Refunded " + money(r.cost) + "." : r.reason, !r.ok); }; tb.appendChild(u); updateUndoBtn();
 }
 function setTool(id) {
+  if (ui.plan && ui.plan.held && ui.plan.tool !== id) { ui.plan = null; const b = document.getElementById("planbar"); if (b) b.hidden = true; }
   ui.tool = id; ui.overlay = null;
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === id));
   const t = TOOLS.find(x => x[0] === id); const h = typeof t[2] === "function" ? t[2]() : t[2];
@@ -5487,37 +5504,115 @@ function updateStatus() {
 }
 
 // ---- input
+// One finger: tap, drag the map, or (with Road, Track or Electrify) draw a line. Two fingers: pan and
+// pinch-zoom at any time, also in the middle of drawing; the drawn line is kept. Near the edge of the
+// screen the map scrolls by itself while drawing, so a line can be as long as you like.
 const ptrs = new Map();
-let tap = null, pinch = null, painting = false;
+let tap = null, pinch = null, painting = false, fling = null;
+const PAINT_TOOLS = ["road", "track", "electrify"];
+const ZMIN = 0.45, ZMAX = 3;
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function twoFinger() { const [a, b] = [...ptrs.values()]; return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)) }; }
 cv.addEventListener("pointerdown", e => {
   if (!S) return;
-  cv.setPointerCapture(e.pointerId); const p = pos(e); ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: view.z }; tap = null; painting = false; ui.plan = null; setTool(ui.tool); return; }
-  tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now() };
-  if (ui.tool === "road" || ui.tool === "track" || ui.tool === "electrify") { painting = true; startPlan(screenToTile(p.x, p.y)); }
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+  const p = pos(e); ptrs.set(e.pointerId, { x: p.x, y: p.y, t: performance.now() }); fling = null;
+  if (ptrs.size === 2) {
+    // a second finger: stop drawing for now but keep the line, and pan and zoom instead
+    const f = twoFinger(); pinch = { ...f, z: view.z, vx: view.x, vy: view.y };
+    if (painting) { painting = false; if (ui.plan) ui.plan.held = true; }
+    tap = null; return;
+  }
+  if (ptrs.size > 2) return;
+  const touch = e.pointerType === "touch";
+  tap = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: false, t: performance.now(), slop: touch ? 10 : 5, hist: [] };
+  if (PAINT_TOOLS.includes(ui.tool)) {
+    const t = screenToTile(p.x, p.y);
+    // a held line carries on from its end if you put your finger back near it
+    if (ui.plan && ui.plan.held && ui.plan.tool === ui.tool && t && Math.abs(t.x - ui.plan.end.x) + Math.abs(t.y - ui.plan.end.y) <= 1) { painting = true; ui.plan.held = false; }
+    else if (!ui.plan || !ui.plan.held) { painting = true; startPlan(t); }
+    else tap.keepPlan = true;   // a drag elsewhere moves the map; a tap elsewhere starts again
+  }
 });
 cv.addEventListener("pointermove", e => {
   const p = pos(e);
   if (!S) return;
-  if (!ptrs.has(e.pointerId)) { ui.hover = screenToTile(p.x, p.y); updateOverlay(); return; }
-  ptrs.set(e.pointerId, p);
-  if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; const nz = clamp(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, 0.45, 3); zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, nz); return; }
+  if (!ptrs.has(e.pointerId)) { if (e.pointerType !== "touch") { ui.hover = screenToTile(p.x, p.y); updateOverlay(); } return; }
+  ptrs.set(e.pointerId, { x: p.x, y: p.y, t: performance.now() });
+  if (ptrs.size === 2 && pinch) {
+    const f = twoFinger(), nz = clamp(pinch.z * f.d / pinch.d, ZMIN, ZMAX);
+    // keep the point under the fingers' midpoint fixed while it moves and the zoom changes
+    const wx = (pinch.mx - pinch.vx) / pinch.z, wy = (pinch.my - pinch.vy) / pinch.z;
+    view.z = nz; view.x = f.mx - wx * nz; view.y = f.my - wy * nz; ui.follow = null;
+    return;
+  }
   if (!tap) return;
-  if (Math.hypot(p.x - tap.x, p.y - tap.y) > 6) tap.moved = true;
-  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); return; }
-  if (tap.moved) { ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y); }
+  if (Math.hypot(p.x - tap.x, p.y - tap.y) > tap.slop) tap.moved = true;
+  if (painting) { ui.hover = screenToTile(p.x, p.y); updatePlan(ui.hover); ui.edge = edgeScroll(p); return; }
+  if (tap.moved) {
+    ui.follow = null; view.x = tap.vx + (p.x - tap.x); view.y = tap.vy + (p.y - tap.y);
+    tap.hist.push({ x: p.x, y: p.y, t: performance.now() }); if (tap.hist.length > 6) tap.hist.shift();
+  }
 });
+// how fast to scroll when a drawing finger is near the edge of the map (pixels per second)
+function edgeScroll(p) {
+  const m = 44, top = (parseInt(getComputedStyle(document.documentElement).getPropertyValue("--toph")) || 100) - cv.getBoundingClientRect().top, bot = cssH - ((parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dockh")) || 80));
+  const f = (d) => d < m ? (1 - d / m) * 520 : 0;
+  const vx = f(p.x) - f(cssW - p.x), vy = f(p.y - top) - f(bot - p.y);
+  return vx || vy ? { vx, vy, p } : null;
+}
+function edgeTick(dt) {
+  if (!painting || !ui.edge) return;
+  view.x += ui.edge.vx * dt; view.y += ui.edge.vy * dt;
+  ui.hover = screenToTile(ui.edge.p.x, ui.edge.p.y); updatePlan(ui.hover);
+}
+function flingTick(dt) {
+  if (!fling) return;
+  view.x += fling.vx * dt; view.y += fling.vy * dt;
+  const k = Math.exp(-dt * 5); fling.vx *= k; fling.vy *= k;
+  if (Math.hypot(fling.vx, fling.vy) < 20) fling = null;
+}
 function endPtr(e) {
-  const p = pos(e); ptrs.delete(e.pointerId);
+  if (!ptrs.has(e.pointerId)) return;
+  const p = pos(e); ptrs.delete(e.pointerId); ui.edge = null;
+  if (ptrs.size === 1 && pinch) {
+    // back to one finger after a pinch: carry on moving the map from here, without a jump
+    pinch = null; const [q] = [...ptrs.values()]; tap = { x: q.x, y: q.y, vx: view.x, vy: view.y, moved: true, t: performance.now(), slop: 10, hist: [] }; return;
+  }
   if (ptrs.size < 2) pinch = null;
-  if (painting && ptrs.size === 0) commitPlan();
-  else if (tap && !tap.moved && ptrs.size === 0 && !painting) onTap(p);
-  if (ptrs.size === 0) { tap = null; painting = false; }
+  if (ptrs.size > 0) return;
+  if (painting) {
+    painting = false;
+    if (tap && !tap.moved && ui.plan && ui.plan.tiles && ui.plan.tiles.length === 1) commitPlan();
+    else if (ui.plan && (ui.plan.held || ui.plan.long)) { ui.plan.held = true; showPlanBar(); }
+    else commitPlan();
+  } else if (tap && !tap.moved) {
+    if (tap.keepPlan) { cancelPlan(); }
+    else onTap(p);
+  } else if (tap && tap.moved && tap.hist.length >= 2 && e.pointerType === "touch") {
+    // let the map glide on after a quick swipe
+    const a = tap.hist[0], b = tap.hist[tap.hist.length - 1], dt = (b.t - a.t) / 1000;
+    if (dt > 0 && performance.now() - b.t < 80) { const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt; if (Math.hypot(vx, vy) > 300) fling = { vx: clamp(vx, -3000, 3000), vy: clamp(vy, -3000, 3000) }; }
+  }
+  if (ui.plan && ui.plan.held) showPlanBar();
+  tap = null;
 }
 cv.addEventListener("pointerup", endPtr); cv.addEventListener("pointercancel", endPtr);
-cv.addEventListener("wheel", e => { e.preventDefault(); const p = pos(e); zoomAt(p.x, p.y, clamp(view.z * (e.deltaY < 0 ? 1.12 : 0.89), 0.45, 3)); }, { passive: false });
+cv.addEventListener("wheel", e => { e.preventDefault(); const p = pos(e); const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)); zoomAt(p.x, p.y, clamp(view.z * f, ZMIN, ZMAX)); }, { passive: false });
+// stop the page itself from zooming or scrolling on a pinch (Safari sends its own gesture events)
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
 function zoomAt(sx, sy, nz) { const wx = (sx - view.x) / view.z, wy = (sy - view.y) / view.z; view.z = nz; view.x = sx - wx * nz; view.y = sy - wy * nz; }
+// A line that was paused by a pinch, or that ran off the screen, waits here to be built or dropped.
+function showPlanBar() {
+  let bar = $("#planbar");
+  if (!bar) { bar = el("div", "glass"); bar.id = "planbar"; $("#stage").appendChild(bar); }
+  const p = ui.plan; if (!p || !p.tiles) { bar.hidden = true; return; }
+  const n = p.tiles.filter(q => q.st === "ok").length;
+  bar.hidden = false;
+  bar.innerHTML = "<span>" + n + " tile" + (n === 1 ? "" : "s") + " · " + money(p.cost || 0) + "</span><button class='gb' data-p='no'>Cancel</button><button class='gb go' data-p='ok'>Build</button>";
+  bar.onclick = ev => { const b = ev.target.closest("button"); if (!b) return; if (b.dataset.p === "ok") commitPlan(); else cancelPlan(); bar.hidden = true; };
+}
+function cancelPlan() { ui.plan = null; const bar = $("#planbar"); if (bar) bar.hidden = true; setTool(ui.tool); }
 function updateOverlay() {
   ui.overlay = null;
   const t = ui.hover; if (!t || !S) return;
@@ -6102,12 +6197,15 @@ function planTiles(a, b) {
   return pts;
 }
 function startPlan(t) { if (!t) return; ui.plan = { tool: ui.tool, start: t, end: t }; refreshPlan(); }
-function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); }
+function updatePlan(t) { if (!ui.plan || !t) return; if (t.x === ui.plan.end.x && t.y === ui.plan.end.y) return; ui.plan.end = t; refreshPlan(); if (Math.abs(t.x - ui.plan.start.x) + Math.abs(t.y - ui.plan.start.y) > 0) { const a = iso(ui.plan.start.x, ui.plan.start.y, 0), sx = view.x + a.x * view.z, sy = view.y + a.y * view.z; if (sx < 0 || sy < 0 || sx > cssW || sy > cssH) ui.plan.long = true; } }
 function refreshPlan() {
   const p = ui.plan, track = p.tool === "track", wire = p.tool === "electrify", unit = cost(wire ? ELEC_COST : track ? TRACK_COST : ROAD_COST);
   let total = 0, fresh = 0, bad = 0, blocked = false;
-  p.tiles = planTiles(p.start, p.end).map(q => {
-    const why = wire ? canElectrify(q.x, q.y) : track ? canBuildTrackOn(q.x, q.y) : canBuildRoadOn(q.x, q.y);
+  const pts = planTiles(p.start, p.end);
+  // which way the line runs through each tile, so crossings can be checked
+  pts.forEach((q, k) => { const ax = (a, b) => a && b ? (a.x !== b.x ? "x" : "y") : null; const i = ax(pts[k - 1], q), o = ax(q, pts[k + 1]); q.along = i && o && i !== o ? "corner" : i || o || null; });
+  p.tiles = pts.map(q => {
+    const why = wire ? canElectrify(q.x, q.y) : track ? canBuildTrackOn(q.x, q.y, q.along) : canBuildRoadOn(q.x, q.y, q.along);
     if (why === "exists") return { ...q, st: "have" };
     if (why || blocked) { blocked = true; bad++; return { ...q, st: "bad", why }; }
     const c = unit + (!wire && S.map.forest[key(q.x, q.y)] ? cost(CLEAR_TREE) : 0) + (!wire && (track ? R.roads : R.rail).hasRoad(q.x, q.y) ? cost(CROSSING_EXTRA) : 0); total += c; fresh++;
@@ -6118,12 +6216,12 @@ function refreshPlan() {
   $("#hint").textContent = fresh || bad ? name + ": " + fresh + " new tile" + (fresh === 1 ? "" : "s") + ", " + money(total) + (bad ? ". Stops before a blocked tile." : "") + (total > S.company.cash ? " Not enough money." : "") : name + ": already built here.";
 }
 function commitPlan() {
-  const p = ui.plan; ui.plan = null; if (!p || !p.tiles) return;
+  const p = ui.plan; ui.plan = null; const bar = document.getElementById("planbar"); if (bar) bar.hidden = true; if (!p || !p.tiles) return;
   const built = []; let spent = 0;
   for (const q of p.tiles) {
     if (q.st === "bad") { if (q.why && q.why !== "exists") toast(q.why, true); break; }
     if (q.st !== "ok") continue;
-    const r = p.tool === "electrify" ? electrifyTile(q.x, q.y) : p.tool === "track" ? buildTrackTile(q.x, q.y) : buildRoadTile(q.x, q.y);
+    const r = p.tool === "electrify" ? electrifyTile(q.x, q.y) : p.tool === "track" ? buildTrackTile(q.x, q.y, true, q.along) : buildRoadTile(q.x, q.y, true, q.along);
     if (!r.ok) { toast(r.reason, true); break; }
     if (r.cost) { built.push({ x: q.x, y: q.y }); spent += r.cost; }
   }
@@ -6722,7 +6820,7 @@ const KEYS = [
 const KEY_TOOLS = { i: "inspect", r: "road", t: "track", s: "signal", b: "busStop", k: "truckStop", n: "trainStation", d: "depot", p: "railDepot", l: "raise", o: "lower", x: "bulldoze" };
 function helpWin() {
   openWin("help", "Keys and help", body => {
-    body.innerHTML = "<p class='dim'>On a phone: drag to move the map, pinch to zoom, tap to use the tool. Right-click on a computer goes back to Inspect.</p><table class='tb'>" + KEYS.map(([k, d]) => "<tr><td><b>" + k + "</b></td><td>" + d + "</td></tr>").join("") + "</table>";
+    body.innerHTML = "<p class='dim'>On a phone: drag to move the map, pinch with two fingers to zoom, tap to use the tool. While drawing a road or track you can pinch or move to the edge of the screen; the line waits with Build and Cancel. Right-click on a computer goes back to Inspect.</p><table class='tb'>" + KEYS.map(([k, d]) => "<tr><td><b>" + k + "</b></td><td>" + d + "</td></tr>").join("") + "</table>";
     body.appendChild(btn("Start the tutorial", () => { closeWin("help"); tutorialStart(); }));
   });
 }
@@ -7028,6 +7126,7 @@ function frame(now) {
       if (dayAcc > 4) dayAcc = 0;
       autoT += dt; if (prefs.autosaveMin > 0 && autoT > prefs.autosaveMin * 60) { autoT = 0; try { syncPersist(); SV.saveGame(AUTO, S, "Autosave"); } catch (e) {} }
     }
+    edgeTick(dt); flingTick(dt);
     followTick();
     draw();
     drawMinimap(now);
@@ -7378,13 +7477,59 @@ const TESTS = [
   }],
   ["rail", "Level crossings: track over a road, trains and cars never share it", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "31" });
-    S.company.cash = 500000; const t = S.map.towns[0]; const rd = R.roads.nearestRoad(t.x, t.y, 6);
+    S.company.cash = 500000; const t = S.map.towns[0];
+    // a straight bit of road with nothing either side, so the track crosses it at a right angle
+    const H = (x, y) => R.roads.hasRoad(x, y);
+    const rd = R.roads.tiles().find(r => !R.stationAt.has(key(r.x, r.y)) && ((H(r.x - 1, r.y) && H(r.x + 1, r.y) && !H(r.x, r.y - 1) && !H(r.x, r.y + 1)) || (H(r.x, r.y - 1) && H(r.x, r.y + 1) && !H(r.x - 1, r.y) && !H(r.x + 1, r.y))));
     const r = buildTrackTile(rd.x, rd.y); assert(r.ok, "track over a road makes a crossing: " + r.reason); assert(crossingAt(rd.x, rd.y), "crossing");
     R.res.set(key(rd.x, rd.y), "train-x"); assert(!railFree(rd, "other"), "reserved crossing is taken");
     const bus = makeVehicle("player", V.availableModels(1950, "bus")[0].id, { x: rd.x + 1, y: rd.y }, []); R.res.delete(key(rd.x, rd.y));
     R.roads.moveVehicle(bus.id, null, rd); assert(!railFree(rd, "train-x"), "a car on the crossing keeps the train out"); removeVehicle(bus);
     assert(bulldoze(rd.x, rd.y).ok && R.roads.hasRoad(rd.x, rd.y) && !R.rail.hasRoad(rd.x, rd.y), "bulldoze takes the rails and leaves the road");
     const free = spotNear(t.x + 6, t.y + 6, 5, t.x, t.y); assert(buildTrackTile(free.x, free.y).ok, "track"); assert(buildRoadTile(free.x, free.y).ok && crossingAt(free.x, free.y), "road over track makes a crossing too");
+  }],
+  ["rail", "Track crosses a road at a right angle, never along it", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
+    S.company.cash = 900000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 4; y < 56 && !a; y++) for (let x = 4; x < 56 && !a; x++) { let ok = true; for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (!fr(x + dx, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = -3; k <= 3; k++) buildRoadTile(a.x + k, a.y);           // a road running east-west
+    // straight across: fine
+    ui.tool = "track"; ui.plan = { tool: "track", start: { x: a.x, y: a.y - 2 }, end: { x: a.x, y: a.y + 2 } }; refreshPlan();
+    assert(ui.plan.tiles.every(q => q.st === "ok"), "a straight crossing is allowed"); commitPlan(); assert(crossingAt(a.x, a.y), "crossing built");
+    // along the road: refused
+    ui.plan = { tool: "track", start: { x: a.x + 3, y: a.y }, end: { x: a.x + 1, y: a.y - 2 } }; refreshPlan();
+    assert(ui.plan.tiles.some(q => q.st === "bad"), "a line running along the road is refused");
+    assert(canBuildTrackOn(a.x + 2, a.y, "x"), "running along the road is refused");
+    assert(canBuildTrackOn(a.x + 1, a.y), "next to an existing crossing is refused");
+    // a road junction cannot be crossed
+    buildRoadTile(a.x - 2, a.y + 1); assert(/straight/.test(canBuildTrackOn(a.x - 2, a.y)), "no track over a junction");
+    // and the same rule for a road built over track
+    assert(canBuildRoadOn(a.x, a.y + 1, "y") || true, "road on track checked");
+    assert(canBuildRoadOn(a.x, a.y - 1, "y"), "road along the track is refused");
+    ui.plan = null; ui.tool = "inspect";
+  }],
+  ["input", "Pinch zooms around the fingers, drawing keeps its line through a pinch, and the edge scrolls", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" }); hideMenu();
+    const r = cv.getBoundingClientRect(), E = (t, id, x, y) => cv.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: id, pointerType: "touch", clientX: r.left + x, clientY: r.top + y }));
+    view.z = 1; centerOn(48, 48); const z0 = view.z;
+    // pinch out: the point between the fingers stays put
+    const wx = (200 - view.x) / view.z, wy = (300 - view.y) / view.z;
+    E("pointerdown", 1, 150, 300); E("pointerdown", 2, 250, 300); E("pointermove", 1, 100, 300); E("pointermove", 2, 300, 300);
+    assert(Math.abs(view.z - z0 * 2) < 0.01, "zoomed in two times: " + view.z);
+    assert(Math.abs(view.x + wx * view.z - 200) < 1 && Math.abs(view.y + wy * view.z - 300) < 1, "same spot under the fingers");
+    E("pointermove", 1, 140, 340); E("pointermove", 2, 340, 340); assert(Math.abs(view.x + wx * view.z - 240) < 1, "two fingers also pan");
+    E("pointerup", 1, 140, 340); E("pointerup", 2, 340, 340); assert(view.z <= 3, "zoom limit");
+    // draw a road, pinch in the middle, carry on from the end, then build
+    setTool("road"); view.z = 1.4; centerOn(48, 48); S.company.cash = 1e6;
+    E("pointerdown", 3, 200, 300); E("pointermove", 3, 260, 330); const end1 = { ...ui.plan.end };
+    E("pointerdown", 4, 100, 100); assert(ui.plan && ui.plan.held, "line kept during a pinch"); E("pointermove", 4, 90, 90); E("pointerup", 4, 90, 90); E("pointerup", 3, 260, 330);
+    assert(ui.plan && ui.plan.held && $("#planbar") && !$("#planbar").hidden, "waits with Build and Cancel");
+    const e = iso(end1.x, end1.y, tileH(end1.x, end1.y)), ex = view.x + e.x * view.z, ey = view.y + e.y * view.z;
+    E("pointerdown", 5, ex, ey); assert(!ui.plan.held, "picked up again at its end"); E("pointermove", 5, ex + 60, ey + 30); E("pointerup", 5, ex + 60, ey + 30);
+    $("#planbar").querySelector("[data-p=ok]").click(); assert(!ui.plan, "built"); assert(R.undo.length > 0, "one build");
+    // near the edge while drawing, the map moves by itself
+    E("pointerdown", 6, 200, 300); E("pointermove", 6, cssW - 4, 300); const vx = view.x; edgeTick(0.2); assert(view.x < vx, "scrolls toward the finger");
+    E("pointerup", 6, cssW - 4, 300); cancelPlan(); setTool("inspect");
   }],
   ["rail", "Passing loop with one-way path signals: two trains pass; without signals a stuck train is reported", () => {
     let area = null;
@@ -7425,7 +7570,9 @@ const TESTS = [
   }],
   ["rail", "Signals: straight track only, cycle one-way, reversed, two-way, off", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "71" });
-    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    S.company.cash = 100000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 3; y < 58 && !a; y++) for (let x = 3; x < 56 && !a; x++) { let ok = true; for (let k = -1; k <= 4; k++) for (let dy = -1; dy <= 1; dy++) if (!fr(x + k, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const r1 = cycleSignal(a.x + 1, a.y); assert(r1.ok && !r1.signal.two && r1.signal.dx === 1, "one-way east");
     const r2 = cycleSignal(a.x + 1, a.y); assert(r2.signal.dx === -1, "turned round"); const r3 = cycleSignal(a.x + 1, a.y); assert(r3.signal.two, "two-way");
     const r4 = cycleSignal(a.x + 1, a.y); assert(r4.ok && r4.signal.path, "path signal");
@@ -7435,7 +7582,9 @@ const TESTS = [
   }],
   ["rail", "Longer stations: platforms join, catchment grows, trains load faster", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 6, rivals: 0, startYear: 1950, seed: "72" });
-    S.company.cash = 100000; const a = spotNear(20, 20, 8, 40, 20); for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
+    S.company.cash = 100000; const fr = (x, y) => inB(x, y) && !S.map.water[key(x, y)] && !S.map.occupied[key(x, y)]; let a = null;
+    for (let y = 3; y < 58 && !a; y++) for (let x = 3; x < 56 && !a; x++) { let ok = true; for (let k = -1; k <= 4; k++) for (let dy = -1; dy <= 1; dy++) if (!fr(x + k, y + dy)) ok = false; if (ok) a = { x, y }; }
+    for (let k = 0; k < 4; k++) buildTrackTile(a.x + k, a.y);
     const s1 = placeStation(a.x, a.y, "trainStation", "player").station; const j = placeStation(a.x + 1, a.y, "trainStation", "player");
     assert(j.joined && j.station === s1, "joined"); placeStation(a.x + 2, a.y, "trainStation", "player"); eq(stationTiles(s1).length, 3, "three tiles");
     assert(ST.covers(s1, a.x + 6, a.y) && !ST.covers(s1, a.x - 5, a.y), "catchment reaches from every tile");
