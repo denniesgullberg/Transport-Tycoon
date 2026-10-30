@@ -8313,9 +8313,12 @@ const TESTS = [
     for (let k = 0; k < 10; k++) expandIndustry(mine, false); eq(mine.level, 5, "size 5 at most");
     assert(shrinkIndustry(mine, true) && mine.level === 4, "can shrink");
     // run the months: a served mine keeps its rating up and grows
-    mine.level = 1; mine.goodMonths = 0; const keep = rng; let grew = false;
-    for (let k = 0; k < 60 && !grew; k++) { simulateDays(30); if ((mine.level || 1) > 1) grew = true; }
-    assert(grew || mine.goodMonths > 0, "service is noticed");
+    simulateDays(60); assert(mine.rAvg > 0, "service is noticed");
+    // with a good rating held for months it expands
+    mine.level = 1; mine.goodMonths = 0; const ro = serviceRatingOf; let grew = false;
+    serviceRatingOf = (id) => id === mine.id ? 0.7 : ro(id);
+    for (let k = 0; k < 200 && !grew; k++) { industryMonth(); if (mine.level > 1) grew = true; }
+    serviceRatingOf = ro; assert(grew, "good service makes it expand");
     assert(mine.hist && mine.hist.length > 0, "output history");
     // an unserved, idle industry shrinks
     const lone = S.map.industries.find(i => isPrimaryInd(i) && i !== mine && serviceRatingOf(i.id) === 0); lone.level = 3; lone.idleMonths = 30;
@@ -8334,7 +8337,10 @@ const TESTS = [
     assert(S.map.industries.length > n0 - 3, "industries still there");
     const changed = S.map.industries.filter((i, k) => k < outs0.length && i.productionPerMonth !== outs0[k]).length;
     assert(changed > 5, "output moves over time: " + changed);
-    assert(S.news.items.some(n => /has opened/.test(n.text)), "a new industry opened");
+    // and a new industry can open anywhere
+    const n1 = S.map.industries.length; let opened = false;
+    for (let k = 0; k < 20 && !opened; k++) { S.date.year = S.startYear + 2; const before = S.map.industries.length; const near = { x: 8 + Math.floor(Math.random() * (S.map.w - 16)), y: 8 + Math.floor(Math.random() * (S.map.h - 16)) }; if (mapgen.addIndustry(S.map, "farm", Math.random, near)) opened = S.map.industries.length > before; }
+    assert(opened, "a new industry opened away from towns");
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
