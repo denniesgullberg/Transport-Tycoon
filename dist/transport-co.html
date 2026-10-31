@@ -4346,6 +4346,8 @@ function climateCargos() {
   for (const k of kinds) { const ch = core.CHAINS[k]; if (ch && ch.out) set.add(ch.out); }   // only cargo something here produces
   return [...set];
 }
+// What an industry takes in this climate: a factory takes rubber only where rubber is grown.
+function inputsHere(kind) { const ch = core.CHAINS[kind] || {}, have = climateCargos(); return (ch.in || []).filter(c => have.includes(c)); }
 function cargoUse(c) {
   if (CARGO_USE[c]) return CARGO_USE[c];
   const kinds = (mapgen.CLIMATE_INDUSTRIES[S.cfg.climate] || []);
@@ -5673,7 +5675,7 @@ function vehiclesFor(cargo) {
 }
 function industryWin(i) {
   openWin("ind", i.name, body => {
-    const ch = core.CHAINS[i.kind] || {}, out = ch.out, ins = ch.in || [];
+    const ch = core.CHAINS[i.kind] || {}, out = ch.out, ins = inputsHere(i.kind);
     const kindName = i.kind.replace(/([A-Z])/g, " $1").toLowerCase();
     let h = "<div class='kv'><span>Type</span><b>" + kindName + "</b></div>";
     if (out) h += "<div class='kv'><span>Produces</span><b>" + out + (ins.length ? " (from " + ins.join(" + ") + " delivered here)" : ", about " + i.productionPerMonth + " a month") + "</b></div>";
@@ -8341,6 +8343,13 @@ const TESTS = [
     const n1 = S.map.industries.length; let opened = false;
     for (let k = 0; k < 20 && !opened; k++) { S.date.year = S.startYear + 2; const before = S.map.industries.length; const near = { x: 8 + Math.floor(Math.random() * (S.map.w - 16)), y: 8 + Math.floor(Math.random() * (S.map.h - 16)) }; if (mapgen.addIndustry(S.map, "farm", Math.random, near)) opened = S.map.industries.length > before; }
     assert(opened, "a new industry opened away from towns");
+  }],
+  ["industry", "Factories only list inputs that exist in the climate", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
+    eq(inputsHere("factory").join(","), "grain,steel", "temperate factory");
+    const f = S.map.industries.find(i => i.kind === "factory"); industryWin(f); assert(!/rubber/.test(document.querySelector(".win[data-id=ind]").textContent), "no rubber in the window"); closeAllWins();
+    startGame({ climate: "tropical", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
+    eq(inputsHere("factory").join(","), "grain,rubber", "tropical factory");
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();

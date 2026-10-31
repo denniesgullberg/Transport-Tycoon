@@ -933,6 +933,13 @@ const TESTS = [
     for (let k = 0; k < 20 && !opened; k++) { S.date.year = S.startYear + 2; const before = S.map.industries.length; const near = { x: 8 + Math.floor(Math.random() * (S.map.w - 16)), y: 8 + Math.floor(Math.random() * (S.map.h - 16)) }; if (mapgen.addIndustry(S.map, "farm", Math.random, near)) opened = S.map.industries.length > before; }
     assert(opened, "a new industry opened away from towns");
   }],
+  ["industry", "Factories only list inputs that exist in the climate", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
+    eq(inputsHere("factory").join(","), "grain,steel", "temperate factory");
+    const f = S.map.industries.find(i => i.kind === "factory"); industryWin(f); assert(!/rubber/.test(document.querySelector(".win[data-id=ind]").textContent), "no rubber in the window"); closeAllWins();
+    startGame({ climate: "tropical", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
+    eq(inputsHere("factory").join(","), "grain,rubber", "tropical factory");
+  }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
     const tools = [...document.querySelectorAll("#tools .tool")];

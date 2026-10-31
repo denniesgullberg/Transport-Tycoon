@@ -6,6 +6,8 @@ function climateCargos() {
   for (const k of kinds) { const ch = core.CHAINS[k]; if (ch && ch.out) set.add(ch.out); }   // only cargo something here produces
   return [...set];
 }
+// What an industry takes in this climate: a factory takes rubber only where rubber is grown.
+function inputsHere(kind) { const ch = core.CHAINS[kind] || {}, have = climateCargos(); return (ch.in || []).filter(c => have.includes(c)); }
 function cargoUse(c) {
   if (CARGO_USE[c]) return CARGO_USE[c];
   const kinds = (mapgen.CLIMATE_INDUSTRIES[S.cfg.climate] || []);

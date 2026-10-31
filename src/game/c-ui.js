@@ -313,7 +313,7 @@ function vehiclesFor(cargo) {
 }
 function industryWin(i) {
   openWin("ind", i.name, body => {
-    const ch = core.CHAINS[i.kind] || {}, out = ch.out, ins = ch.in || [];
+    const ch = core.CHAINS[i.kind] || {}, out = ch.out, ins = inputsHere(i.kind);
     const kindName = i.kind.replace(/([A-Z])/g, " $1").toLowerCase();
     let h = "<div class='kv'><span>Type</span><b>" + kindName + "</b></div>";
     if (out) h += "<div class='kv'><span>Produces</span><b>" + out + (ins.length ? " (from " + ins.join(" + ") + " delivered here)" : ", about " + i.productionPerMonth + " a month") + "</b></div>";
