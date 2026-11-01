@@ -70,6 +70,7 @@ function newGame(cfg) {
   for (let i = 0; i < settings.rivals; i++) { if (delay > 0) S.rivalQueue.push({ i, at: cfg.startYear * 12 + delay + i * 6 }); else addRival(i); }
   initRuntime();
   makeRigDocks(); rebuildSea();
+  townsCatchUp();   // a game that starts in 1990 has towns that already look like 1990
   EV.addNews(S.news, S.date, "info", "Welcome to " + CLIM[cfg.climate].label + " valley. Build roads, stops and a depot, then buy a vehicle.");
   ui.paused = false;
 }
@@ -404,7 +405,7 @@ function dailyTick() {
       if (core.tickTownDay(t, rng)) {
         const g = mapgen.growTown(m, t.id, rng);
         if (g && g.kind === "road") R.roads.addRoad(g.x, g.y);
-        if (g) { const b = t.buildings[t.buildings.length - 1]; if (g.kind === "house" && b) R.bld.set(b.y * m.w + b.x, b); }
+        if (g) { const b = t.buildings[t.buildings.length - 1]; if (g.kind === "house" && b) { b.built = S.date.year; R.bld.set(b.y * m.w + b.x, b); } }
       }
     }
   }
@@ -628,7 +629,7 @@ function bulldoze(x, y) {
     const c = cost(BULLDOZE);
     if (S.company.cash < c) return { ok: false, reason: "Not enough money." };
     spend("construction", c);
-    if (st) removeStationTile(st, x, y);
+    if (st) { removeStationTile(st, x, y); if (st.kind === "dock") { m.occupied[i] = 0; rebuildSea(); } }
     if (dp) { S.depots = S.depots.filter(d => d !== dp); R.depotAt.delete(i); }
     return { ok: true, removed: st ? "station" : "depot" };
   }

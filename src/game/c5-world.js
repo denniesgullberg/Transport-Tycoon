@@ -17,6 +17,7 @@ function councilRefuses(x, y) {
   return "The " + t.name + " council refuses: your rating there is " + ratingLabel(townRating(t)) + ". Advertise or plant trees to win them back.";
 }
 function townMonthly() {
+  redevelopMonth();
   for (const t of S.map.towns) {
     let d = (250 - townRating(t)) * 0.03;   // drifts back towards neutral
     for (const s of S.stations) {

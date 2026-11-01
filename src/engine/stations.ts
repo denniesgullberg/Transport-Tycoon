@@ -16,7 +16,7 @@ export interface Pt { x: number; y: number }
 export type StationKind = "busStop" | "truckStop" | "trainStation" | "dock" | "airport";
 
 /** Catchment radius in tiles. A radius of 3 covers a 7 x 7 square. */
-export const CATCHMENT: Record<StationKind, number> = { busStop: 3, truckStop: 3, trainStation: 4, dock: 4, airport: 5 };
+export const CATCHMENT: Record<StationKind, number> = { busStop: 3, truckStop: 3, trainStation: 4, dock: 6, airport: 5 };
 
 export interface Station {
   id: string;
@@ -95,7 +95,7 @@ export interface BuildingLike { x: number; y: number; kind: string; floors: numb
 export interface TownLike { id: string; buildings: BuildingLike[]; activeStations?: number }
 export interface IndustryLike { id: string; x: number; y: number; output: Record<string, number> }
 
-const PASS_PER_FLOOR: Record<string, number> = { house: 3, shop: 5, apartments: 6, tower: 7, church: 2 };
+const PASS_PER_FLOOR: Record<string, number> = { house: 3, shop: 5, apartments: 6, tower: 7, church: 2, skyscraper: 8 };
 
 /** Give `amount` of cargo from a spot to the stations that cover it. Returns units delivered to stations. */
 function supply(stations: Station[], x: number, y: number, cargo: string, amount: number): number {

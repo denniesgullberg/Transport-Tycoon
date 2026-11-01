@@ -72,7 +72,9 @@ function placeDock(x, y, owner) {
     // tapped the water: put the dock on the free shore tile next to it
     if (m.occupied[i]) return { ok: false, reason: "Something is built here." };
     const land = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).find(t => freeShore(t.x, t.y));
-    if (!land) return { ok: false, reason: "Build a dock on the shore, next to water." };
+    // out at sea, or close to an oil rig: build a dock on stilts in the water instead
+    const rig = m.industries.find(r => r.kind === "oilRig" && Math.hypot(r.x - x, r.y - y) <= 5);
+    if (!land || rig) return placeOffshoreDock(x, y, owner);
     w = { x, y }; x = land.x; y = land.y; i = key(x, y);
   }
   if (!inB(x, y)) return { ok: false, reason: "Build a dock on the shore, next to water." };
@@ -86,6 +88,20 @@ function placeDock(x, y, owner) {
   s.owner = owner; s.water = w; s.tiles = [{ x, y }];
   S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; m.forest[i] = 0; R.sea.addRoad(w.x, w.y);
   return { ok: true, station: s, cost: c, tile: { x, y } };
+}
+const OFFSHORE_COST = 7500;
+function placeOffshoreDock(x, y, owner) {
+  const m = S.map, i = key(x, y);
+  if (!inB(x, y) || !m.water[i] || m.occupied[i] || R.depotAt.has(i)) return { ok: false, reason: "Something is built here." };
+  if (S.stations.some(s => s.water && sameT(s.water, { x, y }))) return { ok: false, reason: "Ships moor here. Pick another spot." };
+  const opts = DIR4.map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter(t => inB(t.x, t.y) && m.water[key(t.x, t.y)] && !m.occupied[key(t.x, t.y)]);
+  const w = opts.sort((a, b) => waterReach(b, 3000) - waterReach(a, 3000))[0];
+  if (!w || waterReach(w, 60) < 30) return { ok: false, reason: "An offshore dock needs open water around it." };
+  const c = cost(OFFSHORE_COST); if (owner === "player") { if (S.company.cash < c) return { ok: false, reason: "Not enough money. An offshore dock costs " + money(c) + "." }; spend("construction", c); }
+  const s = ST.newStation("s" + (++S.ids.s), nameStation("dock", x, y), "dock", x, y);
+  s.owner = owner; s.water = w; s.tiles = [{ x, y }]; s.offshore = true;
+  S.stations.push(s); R.stationAt.set(i, s); m.occupied[i] = 1; rebuildSea();
+  return { ok: true, station: s, cost: c, tile: { x, y }, offshore: true };
 }
 function placeShipyard(x, y, owner) {
   owner = owner || "player";

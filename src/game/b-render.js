@@ -278,8 +278,10 @@ function winQuad(px, py, a, b, face, u0, u1, z0, z1, col) {
   poly([p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]], col);
   return [(p1[0] + p3[0]) / 2, (p1[1] + p3[1]) / 2];
 }
-function buildingHeight(b) { return b.kind === "tower" ? 12 + b.floors * 6 : b.kind === "apartments" ? 6 + b.floors * 5 : b.kind === "church" ? 22 : 9 + b.floors * 4.5; }
+function buildingHeight(b) { return b.kind === "skyscraper" ? 14 + b.floors * 5.2 : b.kind === "tower" ? 12 + b.floors * 6 : b.kind === "apartments" ? 6 + b.floors * 5 : b.kind === "church" ? 22 : 9 + b.floors * 4.5; }
 function drawBuilding(px, py, b, x, y, night) {
+  if (b.kind === "skyscraper") return drawSkyscraper(px, py, b, x, y, night);
+  if (drawModern(px, py, b, x, y, night)) return;
   const set = BCOL[b.kind] || BCOL.house, c = set[Math.floor(hash(x, y) * set.length) % set.length], wt = b.kind === "tower" ? 0.68 : 0.74;
   const hh = b.kind === "tower" ? 12 + b.floors * 6 : b.kind === "apartments" ? 6 + b.floors * 5 : b.kind === "church" ? 11 : 5 + b.floors * 4.5;
   const a = wt * TW / 2, bb = wt * TH / 2;
@@ -479,6 +481,18 @@ function drawStation(px, py, s, x, y) {
   const col = ownerColor(s.owner);
   if (s.kind === "dock") {
     if (s.rigId) return;
+    if (s.offshore) {
+      // a platform on stilts with a small office and a crane over the mooring
+      const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0);
+      ctx.fillStyle = "#4a4f57"; for (const [ox, oy] of [[-10, 0], [10, 0], [0, -5], [0, 5]]) ctx.fillRect(px + ox - 1.2, py + oy - 5, 2.4, 9);
+      box(px, py - 5, 1.1, 3, "#9aa0a8", "#7c838c", "#5e646c");
+      box(px - 5, py - 8, 0.35, 8, "#e8e4da", "#cfc9b8", "#a9a290"); diamond(px - 5, py - 16, col, 0.25);
+      ctx.strokeStyle = "#e0a91f"; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(px + 6, py - 8); ctx.lineTo(px + 6, py - 30); ctx.lineTo(px + d.x * 0.8, py + d.y * 0.8 - 30); ctx.stroke();
+      ctx.strokeStyle = "#333"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(px + d.x * 0.8, py + d.y * 0.8 - 30); ctx.lineTo(px + d.x * 0.8, py + d.y * 0.8 - 16); ctx.stroke();
+      R.lights.push([px - 5, py - 12, 9, 0.8], [px + 6, py - 30, 5, 0.9, "#ff4a3a"]);
+      if (prefs.labels && view.z >= 0.7) R.labelsLate.push([px, py - 44, s.name, 9.5, false, col]);
+      return;
+    }
     // the shed on the shore; the pier and crane are drawn after the land so the shore does not hide them
     const w = s.water, d = iso(w.x - s.x, w.y - s.y, 0);
     box(px - d.x * 0.12, py - d.y * 0.12, 0.6, 12, "#d3c09a", "#b49f78", "#8a7552");
@@ -602,7 +616,7 @@ function draw() {
     const wx = (sx - view.x) / view.z, wy = (sy - view.y) / view.z, u = wx / (TW / 2), v = wy / (TH / 2);
     const x = (u + v) / 2, y = (v - u) / 2; minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
   }
-  const x0 = clamp(Math.floor(minX) - 3, 0, m.w - 1), x1 = clamp(Math.ceil(maxX) + 3, 0, m.w - 1), y0 = clamp(Math.floor(minY) - 3, 0, m.h - 1), y1 = clamp(Math.ceil(maxY) + 8, 0, m.h - 1);
+  const x0 = clamp(Math.floor(minX) - 3, 0, m.w - 1), x1 = clamp(Math.ceil(maxX) + 3, 0, m.w - 1), y0 = clamp(Math.floor(minY) - 3, 0, m.h - 1), y1 = clamp(Math.ceil(maxY) + 18, 0, m.h - 1);   // tall towers below the screen still reach up into it
   // 1. ground
   R.foam = []; R.glint = [[], [], [], []];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) drawGround(x, y, fx);

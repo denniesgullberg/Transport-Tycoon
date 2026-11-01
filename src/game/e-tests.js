@@ -940,6 +940,39 @@ const TESTS = [
     startGame({ climate: "tropical", difficulty: "easy", mapSize: 96, towns: 10, rivals: 0, startYear: 1950, seed: "11" });
     eq(inputsHere("factory").join(","), "grain,rubber", "tropical factory");
   }],
+  ["towns", "Towns rebuild over the years: flats, towers and skyscrapers in modern styles", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 1950, seed: "7" });
+    const t = S.map.towns.slice().sort((a, b) => b.population - a.population)[0];
+    assert(t.buildings.every(b => b.built && b.built < 1950), "old towns at the start");
+    t.population = 5000; let sky = false;
+    for (let y = 1950; y <= 2010; y++) { redevelopTown(t, y, 30, true); sky = sky || t.buildings.some(b => b.kind === "skyscraper"); }
+    assert(sky, "a big town gets a skyscraper"); assert(S.news.items.some(n => /first skyscraper/.test(n.text)), "news");
+    const tall = t.buildings.find(b => b.kind === "skyscraper"); assert(tall.built >= 1975 && tall.floors >= 10, "skyscrapers from 1975, ten floors or more");
+    assert(t.buildings.some(b => ERA(b.built) === 2), "modern buildings");
+    for (const b of t.buildings) if (b.kind === "skyscraper") assert(Math.hypot(b.x - t.x, b.y - t.y) <= t.radius * 0.31, "skyscrapers stand in the middle");
+    // a small village stays low
+    const v = S.map.towns.slice().sort((a, b) => a.population - b.population)[0]; v.population = 200;
+    for (let y = 1950; y <= 2010; y++) redevelopTown(v, y, 10, false); assert(!v.buildings.some(b => b.kind === "skyscraper" || b.kind === "tower"), "villages keep low buildings");
+    view.z = 1.3; centerOn(t.x, t.y); R.clock = DAYNIGHT_SECONDS * 0.75; draw(); R.clock = 0; draw();
+    // a game that starts late already has modern towns
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 2000, seed: "7" });
+    assert(S.map.towns.some(z => z.buildings.some(b => b.kind === "apartments" || b.kind === "tower" || b.kind === "skyscraper")), "towns in 2000 have flats and towers");
+    // new houses carry their build year
+    simulateDays(200); assert(S.map.towns.every(z => z.buildings.every(b => b.built)), "every building has a year");
+  }],
+  ["water", "Docks reach further, and offshore docks can be built by oil rigs", () => {
+    eq(ST.CATCHMENT.dock, 6, "dock catchment");
+    let rig = null, d = null;
+    for (const seed of ["11", "12", "13", "14", "15", "16"]) { startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 16, rivals: 0, startYear: 1960, seed, water: 0.85 }); rig = S.map.industries.find(i => i.kind === "oilRig"); if (rig) break; }
+    assert(rig, "an oil rig"); S.company.cash = 1e6;
+    let spot = null; for (let r = 2; r <= 5 && !spot; r++) for (let dy = -r; dy <= r && !spot; dy++) for (let dx = -r; dx <= r && !spot; dx++) { const x = rig.x + dx, y = rig.y + dy; if (inB(x, y) && S.map.water[key(x, y)] && !S.map.occupied[key(x, y)] && !S.stations.some(s => s.water && sameT(s.water, { x, y }))) spot = { x, y }; }
+    const cash = S.company.cash; const r = placeDock(spot.x, spot.y); assert(r.ok && r.offshore, r.reason);
+    assert(S.map.water[key(r.station.x, r.station.y)], "built in the water"); assert(S.company.cash <= cash - cost(OFFSHORE_COST) + 1, "costs more than a shore dock");
+    assert(covered(r.station).inds.includes(rig), "covers the rig"); assert(producesAt(r.station, "oil"), "oil can be picked up");
+    assert(R.sea.hasRoad(r.station.water.x, r.station.water.y) && !R.sea.hasRoad(r.station.x, r.station.y), "ships moor beside it, not on it");
+    view.z = 1.4; centerOn(spot.x, spot.y); draw(); assert(R.labelsLate.some(l => l[2] === r.station.name), "named on the map");
+    assert(bulldoze(r.station.x, r.station.y).ok && !S.map.occupied[key(spot.x, spot.y)] && R.sea.hasRoad(spot.x, spot.y), "removed, and the water is open again");
+  }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
     const tools = [...document.querySelectorAll("#tools .tool")];

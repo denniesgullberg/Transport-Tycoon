@@ -32,7 +32,7 @@ export type NameSet = "english" | "swedish" | "german" | "french" | "silly";
 const DEFAULTS: MapOptions = { size: 126, towns: 24, lakes: 0.5, hills: 0.5, forests: 0.5, rivers: 2, industryScale: 1, climate: "temperate", names: "english" };
 
 export type TownSize = "village" | "town" | "city";
-export type BuildingKind = "house" | "shop" | "apartments" | "tower" | "church";
+export type BuildingKind = "house" | "shop" | "apartments" | "tower" | "church" | "skyscraper";
 export type IndustryKind = "coalMine" | "powerStation" | "forest" | "sawmill" | "farm" | "factory" | "steelMill"
   | "oilRig" | "oilWell" | "refinery" | "paperMill" | "printingWorks" | "foodPlant" | "goldMine"
   | "rubberPlantation" | "fruitPlantation" | "waterSupply" | "diamondMine"
@@ -47,7 +47,7 @@ export const CLIMATE_INDUSTRIES: Record<Climate, IndustryKind[]> = {
 };
 export const PRIMARY_INDUSTRIES: IndustryKind[] = ["coalMine", "forest", "farm", "oilRig", "oilWell", "goldMine", "rubberPlantation", "fruitPlantation", "waterSupply", "diamondMine", "sugarMine", "plasticFountain", "batteryFarm", "colaWells"];
 
-export interface Building { x: number; y: number; kind: BuildingKind; floors: number }
+export interface Building { x: number; y: number; kind: BuildingKind; floors: number; built?: number }
 
 export interface TownSite {
   id: string;
