@@ -971,6 +971,13 @@ const TESTS = [
     assert(covered(r.station).inds.includes(rig), "covers the rig"); assert(producesAt(r.station, "oil"), "oil can be picked up");
     assert(R.sea.hasRoad(r.station.water.x, r.station.water.y) && !R.sea.hasRoad(r.station.x, r.station.y), "ships moor beside it, not on it");
     view.z = 1.4; centerOn(spot.x, spot.y); draw(); assert(R.labelsLate.some(l => l[2] === r.station.name), "named on the map");
+    stationWin(r.station); const txt = document.querySelector(".win[data-id=st" + r.station.id + "]").textContent; closeAllWins();
+    assert(/Supplies[^A]*oil/.test(txt), "the dock window says it supplies oil: " + txt.slice(0, 160));
+    // a tanker with this dock in its orders gets oil there
+    let yard = null; for (const t of R.sea.tiles()) { if (R.sea.connected(t, r.station.water) && landNeighbour(t.x, t.y) && !S.map.occupied[key(t.x, t.y)]) { yard = placeShipyard(t.x, t.y); if (yard.ok) break; } }
+    assert(yard && yard.ok, "a shipyard on the same water"); const tk = V.availableModels(S.date.year, "ship").find(m => m.cargo === "oil");
+    const b = buyVehicle(tk.id, yard.depot); b.vh.orders.orders = []; addStopTo(b.vh, r.station.id); assert(r.station.served.oil, "oil pickup starts");
+    simulateDays(120); assert((r.station.waiting.oil || 0) > 0 || b.vh.loaded > 0, "oil reaches the offshore dock"); removeVehicle(b.vh);
     assert(bulldoze(r.station.x, r.station.y).ok && !S.map.occupied[key(spot.x, spot.y)] && R.sea.hasRoad(spot.x, spot.y), "removed, and the water is open again");
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {

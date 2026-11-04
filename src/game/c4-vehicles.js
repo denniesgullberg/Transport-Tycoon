@@ -181,7 +181,11 @@ function stationWin(s) {
       const cs = Object.keys(s.served), c = covered(s), vs = stationVehicles(s);
       let h = "<div class='kv'><span>Type</span><b>" + ({ busStop: "Bus stop", truckStop: "Truck stop", trainStation: "Train station", dock: "Dock", airport: "Airport" })[s.kind] + " · " + stationTiles(s).length + " tile" + (stationTiles(s).length > 1 ? "s" : "") + "</b></div>";
       h += "<div class='kv'><span>Covers</span><b>" + c.houses + " buildings" + (c.inds.length ? ", " + c.inds.map(i => i.name).join(", ") : "") + "</b></div>";
-      h += "<h4>Cargo</h4>" + (cs.length ? cs.map(k => { const r = Math.round(ST.ratingOf(s, k) * 100); return "<div class='cg'><div class='kv'><span>" + k + "</span><b>" + (s.waiting[k] || 0) + " waiting · " + r + "%</b></div><div class='bar'><i style='width:" + r + "%;background:" + (r >= 60 ? "var(--green)" : r >= 40 ? "#c99a1e" : "var(--red)") + "'></i></div><div class='dim small'>" + ratingReasons(s, k) + "</div></div>"; }).join("") : "<p class='dim'>No vehicle has served this stop yet.</p>");
+      // what the catchment area makes and takes, whether or not a vehicle calls yet
+      const all = climateCargos(), sup = all.filter(k => producesAt(s, k)), acc = all.filter(k => acceptsAt(s, k));
+      h += "<div class='kv'><span>Supplies</span><b>" + (sup.join(", ") || "nothing") + "</b></div><div class='kv'><span>Accepts</span><b>" + (acc.join(", ") || "nothing") + "</b></div>";
+      const waitingFor = sup.filter(k => !s.served[k]);
+      h += "<h4>Cargo</h4>" + (waitingFor.length ? "<p class='dim small'>" + waitingFor.join(", ") + " can be picked up here. It starts to pile up once a vehicle for it has this stop in its orders.</p>" : "") + (cs.length ? cs.map(k => { const r = Math.round(ST.ratingOf(s, k) * 100); return "<div class='cg'><div class='kv'><span>" + k + "</span><b>" + (s.waiting[k] || 0) + " waiting · " + r + "%</b></div><div class='bar'><i style='width:" + r + "%;background:" + (r >= 60 ? "var(--green)" : r >= 40 ? "#c99a1e" : "var(--red)") + "'></i></div><div class='dim small'>" + ratingReasons(s, k) + "</div></div>"; }).join("") : "<p class='dim'>No vehicle has served this stop yet.</p>");
       h += "<h4>Vehicles using it (" + vs.length + ")</h4>" + (vs.length ? vs.slice(0, 12).map(v => "<div class='kv sv-row' data-v='" + v.id + "'><span>#" + v.id.slice(1) + " " + (isTrain(v) ? "Train" : modelOf(v).name) + "</span><b>" + vehStatus(v)[0] + "</b></div>").join("") : "<p class='dim'>None yet.</p>");
       body.innerHTML = h;
     };

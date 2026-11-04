@@ -6514,7 +6514,11 @@ function stationWin(s) {
       const cs = Object.keys(s.served), c = covered(s), vs = stationVehicles(s);
       let h = "<div class='kv'><span>Type</span><b>" + ({ busStop: "Bus stop", truckStop: "Truck stop", trainStation: "Train station", dock: "Dock", airport: "Airport" })[s.kind] + " · " + stationTiles(s).length + " tile" + (stationTiles(s).length > 1 ? "s" : "") + "</b></div>";
       h += "<div class='kv'><span>Covers</span><b>" + c.houses + " buildings" + (c.inds.length ? ", " + c.inds.map(i => i.name).join(", ") : "") + "</b></div>";
-      h += "<h4>Cargo</h4>" + (cs.length ? cs.map(k => { const r = Math.round(ST.ratingOf(s, k) * 100); return "<div class='cg'><div class='kv'><span>" + k + "</span><b>" + (s.waiting[k] || 0) + " waiting · " + r + "%</b></div><div class='bar'><i style='width:" + r + "%;background:" + (r >= 60 ? "var(--green)" : r >= 40 ? "#c99a1e" : "var(--red)") + "'></i></div><div class='dim small'>" + ratingReasons(s, k) + "</div></div>"; }).join("") : "<p class='dim'>No vehicle has served this stop yet.</p>");
+      // what the catchment area makes and takes, whether or not a vehicle calls yet
+      const all = climateCargos(), sup = all.filter(k => producesAt(s, k)), acc = all.filter(k => acceptsAt(s, k));
+      h += "<div class='kv'><span>Supplies</span><b>" + (sup.join(", ") || "nothing") + "</b></div><div class='kv'><span>Accepts</span><b>" + (acc.join(", ") || "nothing") + "</b></div>";
+      const waitingFor = sup.filter(k => !s.served[k]);
+      h += "<h4>Cargo</h4>" + (waitingFor.length ? "<p class='dim small'>" + waitingFor.join(", ") + " can be picked up here. It starts to pile up once a vehicle for it has this stop in its orders.</p>" : "") + (cs.length ? cs.map(k => { const r = Math.round(ST.ratingOf(s, k) * 100); return "<div class='cg'><div class='kv'><span>" + k + "</span><b>" + (s.waiting[k] || 0) + " waiting · " + r + "%</b></div><div class='bar'><i style='width:" + r + "%;background:" + (r >= 60 ? "var(--green)" : r >= 40 ? "#c99a1e" : "var(--red)") + "'></i></div><div class='dim small'>" + ratingReasons(s, k) + "</div></div>"; }).join("") : "<p class='dim'>No vehicle has served this stop yet.</p>");
       h += "<h4>Vehicles using it (" + vs.length + ")</h4>" + (vs.length ? vs.slice(0, 12).map(v => "<div class='kv sv-row' data-v='" + v.id + "'><span>#" + v.id.slice(1) + " " + (isTrain(v) ? "Train" : modelOf(v).name) + "</span><b>" + vehStatus(v)[0] + "</b></div>").join("") : "<p class='dim'>None yet.</p>");
       body.innerHTML = h;
     };
@@ -8514,6 +8518,13 @@ const TESTS = [
     assert(covered(r.station).inds.includes(rig), "covers the rig"); assert(producesAt(r.station, "oil"), "oil can be picked up");
     assert(R.sea.hasRoad(r.station.water.x, r.station.water.y) && !R.sea.hasRoad(r.station.x, r.station.y), "ships moor beside it, not on it");
     view.z = 1.4; centerOn(spot.x, spot.y); draw(); assert(R.labelsLate.some(l => l[2] === r.station.name), "named on the map");
+    stationWin(r.station); const txt = document.querySelector(".win[data-id=st" + r.station.id + "]").textContent; closeAllWins();
+    assert(/Supplies[^A]*oil/.test(txt), "the dock window says it supplies oil: " + txt.slice(0, 160));
+    // a tanker with this dock in its orders gets oil there
+    let yard = null; for (const t of R.sea.tiles()) { if (R.sea.connected(t, r.station.water) && landNeighbour(t.x, t.y) && !S.map.occupied[key(t.x, t.y)]) { yard = placeShipyard(t.x, t.y); if (yard.ok) break; } }
+    assert(yard && yard.ok, "a shipyard on the same water"); const tk = V.availableModels(S.date.year, "ship").find(m => m.cargo === "oil");
+    const b = buyVehicle(tk.id, yard.depot); b.vh.orders.orders = []; addStopTo(b.vh, r.station.id); assert(r.station.served.oil, "oil pickup starts");
+    simulateDays(120); assert((r.station.waiting.oil || 0) > 0 || b.vh.loaded > 0, "oil reaches the offshore dock"); removeVehicle(b.vh);
     assert(bulldoze(r.station.x, r.station.y).ok && !S.map.occupied[key(spot.x, spot.y)] && R.sea.hasRoad(spot.x, spot.y), "removed, and the water is open again");
   }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
