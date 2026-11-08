@@ -118,7 +118,17 @@ function wireBars() {
 }
 
 let lastT = performance.now(), dayAcc = 0, autoT = 0, uiT = 0;
+// One bad frame must never stop the game: the error is reported once and the loop carries on.
+let frameErrors = 0;
 function frame(now) {
+  requestAnimationFrame(frame);
+  try { frameBody(now); }
+  catch (e) {
+    frameErrors++; console.error(e);
+    if (frameErrors === 1 || frameErrors % 600 === 0) { R.lastError = String(e && e.stack || e); toast("Something went wrong drawing the map. The game keeps running.", true); }
+  }
+}
+function frameBody(now) {
   const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
   if (S) {
     if (!ui.paused && !S.gameOver && !ui.menuOpen) {
@@ -135,7 +145,6 @@ function frame(now) {
     racePulse(now);
     uiT += dt; if (uiT > 0.15) { uiT = 0; updateStatus(); tutorialTick(); if (S.gameOver) $("#gameover").hidden = false; }
   }
-  requestAnimationFrame(frame);
 }
 
 // -------------------------------------------------------------- test helpers

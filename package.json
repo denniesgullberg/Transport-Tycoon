@@ -1,6 +1,6 @@
 {
   "name": "transport-tycoon",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "private": true,
   "description": "Transport & Co. - a Transport Tycoon Deluxe style browser game in one HTML file",
   "type": "module",

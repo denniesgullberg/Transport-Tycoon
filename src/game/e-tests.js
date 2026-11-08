@@ -980,6 +980,18 @@ const TESTS = [
     simulateDays(120); assert((r.station.waiting.oil || 0) > 0 || b.vh.loaded > 0, "oil reaches the offshore dock"); removeVehicle(b.vh);
     assert(bulldoze(r.station.x, r.station.y).ok && !S.map.occupied[key(spot.x, spot.y)] && R.sea.hasRoad(spot.x, spot.y), "removed, and the water is open again");
   }],
+  ["fix", "Long games: the minimap reuses one canvas, and an error in a frame does not stop the game", () => {
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 128, towns: 20, rivals: 0, startYear: 1950, seed: "1" });
+    MM.img = null; renderMinimapImage(); const c = MM.img, d = MM.data;
+    let made = 0; const orig = document.createElement.bind(document); document.createElement = (t, ...a) => { if (String(t).toLowerCase() === "canvas") made++; return orig(t, ...a); };
+    try { for (let k = 0; k < 50; k++) renderMinimapImage(); } finally { document.createElement = orig; }
+    eq(made, 0, "no new canvases"); assert(MM.img === c && MM.data === d, "same canvas and buffer");
+    startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); renderMinimapImage(); eq(MM.img.width, 64, "resized for a new map");
+    // a frame that throws is caught, reported, and the next frame still runs
+    const od = draw, before = frameErrors; let calls = 0; draw = () => { calls++; throw new Error("test"); };
+    try { frame(performance.now()); frame(performance.now() + 16); } finally { draw = od; }
+    eq(frameErrors - before, 2, "both errors caught"); eq(calls, 2, "kept going");
+  }],
   ["look", "Tool dock and top bar use icons with short labels", () => {
     startGame({ climate: "temperate", difficulty: "easy", mapSize: 64, towns: 8, rivals: 0, startYear: 1950, seed: "1" }); buildToolbar();
     const tools = [...document.querySelectorAll("#tools .tool")];

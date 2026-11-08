@@ -38,9 +38,14 @@ function minimapColour(x, y) {
   if (m.forest[i]) return "#2f6b2f";
   const pal = palette(); return pal.top[m.height[i]] || "#78a853";
 }
+// One canvas and one pixel buffer for the whole game. Making a new canvas every two seconds
+// used up the browser's canvas memory after about 25 minutes on phones (iOS caps it), and the
+// game then stopped drawing.
 function renderMinimapImage() {
-  const m = S.map, c = document.createElement("canvas"); c.width = m.w; c.height = m.h;
-  const g = c.getContext("2d"), data = g.createImageData(m.w, m.h);
+  const m = S.map;
+  if (!MM.img || MM.img.width !== m.w || MM.img.height !== m.h) { MM.img = MM.img || document.createElement("canvas"); MM.img.width = m.w; MM.img.height = m.h; MM.data = null; }
+  const c = MM.img, g = c.getContext("2d"); if (!g) return;
+  const data = MM.data || (MM.data = g.createImageData(m.w, m.h));
   const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
   const cache = {};
   for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
@@ -48,7 +53,7 @@ function renderMinimapImage() {
     data.data[o] = rgb[0]; data.data[o + 1] = rgb[1]; data.data[o + 2] = rgb[2]; data.data[o + 3] = 255;
   }
   for (const ind of m.industries) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = ind.x + dx, y = ind.y + dy; if (!inB(x, y)) continue; const o = (y * m.w + x) * 4; data.data[o] = 230; data.data[o + 1] = 170; data.data[o + 2] = 40; }
-  g.putImageData(data, 0, 0); MM.img = c;
+  g.putImageData(data, 0, 0);
 }
 function drawMinimap(now) {
   const cvm = MM.canvas; if (!cvm || !S || !MM.show) return;
